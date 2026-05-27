@@ -84,13 +84,18 @@ The two numbers will differ — the `:all` report includes files no scenario eve
 ## Output files
 
 ```
-reports/coverage/
-├── index.html              ← Merged report (open this)
-├── coverage-report.json    ← Machine-readable summary (per file)
-├── lcov.info               ← Standard LCOV format — for Codecov, Coveralls, IDE plugins
-├── lcov-report/            ← LCOV HTML report
-└── coverage-HASH/          ← Per-scenario reports (drill into a single test's coverage)
+reports/coverage/                 ← monocart report (files your tests loaded)
+├── index.html                    ← Merged report — open with test:e2e:coverage:report:executed
+├── coverage-report.json          ← Machine-readable summary (per file)
+├── lcov.info                     ← Standard LCOV format — for Codecov, Coveralls, IDE plugins
+├── lcov-report/                  ← LCOV HTML report
+└── coverage-HASH/                ← Per-scenario reports (drill into a single test's coverage)
+
+reports/coverage-istanbul/        ← Istanbul report (entire src/ tree)
+└── index.html                    ← Full-source report — open with test:e2e:coverage:report:all
 ```
+
+The monocart report (`reports/coverage/`) only shows files the test suite loaded. The Istanbul report (`reports/coverage-istanbul/`) walks the entire `src/` directory and shows every file — untouched files appear as 0% rows, giving you an honest picture of which features have zero E2E exercise.
 
 ---
 
