@@ -3,7 +3,9 @@ dist/
 out/
 .turbo/
 *.log
+*.tsbuildinfo
 .DS_Store
+Thumbs.db
 .env
 .env.local
 apps/desktop/out/
@@ -23,6 +25,13 @@ e2e-tests/playwright/test-data/**/*.json
 # MCP server local deps
 packages/mcp-server/node_modules/
 packages/mcp-server/package-lock.json
+
+# IDE
+.vscode/
+.idea/
+
+# Test coverage
+coverage/
 
 # Internal tooling & planning docs (not for repo)
 .claude/

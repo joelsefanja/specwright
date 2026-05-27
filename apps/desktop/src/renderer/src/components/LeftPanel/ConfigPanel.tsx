@@ -13,10 +13,10 @@ function shortName(name: string): string {
 
 const SyncButtonIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-    <path d="M21 3v5h-5"/>
-    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-    <path d="M8 16H3v5"/>
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+    <path d="M8 16H3v5" />
   </svg>
 );
 
@@ -38,6 +38,8 @@ export default function ConfigPanel(): React.JSX.Element {
   const [confirmReset, setConfirmReset] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [verifyStatus, setVerifyStatus] = useState<"idle" | "verifying" | "ok" | "error">("idle");
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
 
   useEffect(() => {
     window.specwright.app.getVersion().then(setAppVersion).catch(() => null);
@@ -56,14 +58,14 @@ export default function ConfigPanel(): React.JSX.Element {
   useEffect(() => {
     if (!projectPath || !loaded) return;
     setAuthFields({
-      userEmail:    (envVars.TEST_USER_EMAIL        as string) ?? "",
-      userName:     (envVars.TEST_USER_NAME         as string) ?? "",
-      userPicture:  (envVars.TEST_USER_PICTURE      as string) ?? "",
-      storageKey:   (envVars.OAUTH_STORAGE_KEY      as string) ?? "",
-      signinPath:   (envVars.OAUTH_SIGNIN_PATH      as string) ?? "",
-      buttonTestId: (envVars.OAUTH_BUTTON_TEST_ID   as string) ?? "",
-      postLoginUrl: (envVars.OAUTH_POST_LOGIN_URL   as string) ?? "",
-      password:     (envVars.TEST_USER_PASSWORD     as string) ?? "",
+      userEmail: (envVars.TEST_USER_EMAIL as string) ?? "",
+      userName: (envVars.TEST_USER_NAME as string) ?? "",
+      userPicture: (envVars.TEST_USER_PICTURE as string) ?? "",
+      storageKey: (envVars.OAUTH_STORAGE_KEY as string) ?? "",
+      signinPath: (envVars.OAUTH_SIGNIN_PATH as string) ?? "",
+      buttonTestId: (envVars.OAUTH_BUTTON_TEST_ID as string) ?? "",
+      postLoginUrl: (envVars.OAUTH_POST_LOGIN_URL as string) ?? "",
+      password: (envVars.TEST_USER_PASSWORD as string) ?? "",
     });
   }, [projectPath, loaded, envVars]);
 
@@ -94,12 +96,12 @@ export default function ConfigPanel(): React.JSX.Element {
 
   const handleSaveAuth = (fields: AuthFields): void => {
     const set = (k: string, v: string): void => { if (v) setEnvVar(k, v); else removeEnvVar(k); };
-    set("TEST_USER_EMAIL",      fields.userEmail);
-    set("TEST_USER_PASSWORD",   fields.password);
-    set("TEST_USER_NAME",       fields.userName);
-    set("TEST_USER_PICTURE",    fields.userPicture);
-    set("OAUTH_STORAGE_KEY",    fields.storageKey);
-    set("OAUTH_SIGNIN_PATH",    fields.signinPath);
+    set("TEST_USER_EMAIL", fields.userEmail);
+    set("TEST_USER_PASSWORD", fields.password);
+    set("TEST_USER_NAME", fields.userName);
+    set("TEST_USER_PICTURE", fields.userPicture);
+    set("OAUTH_STORAGE_KEY", fields.storageKey);
+    set("OAUTH_SIGNIN_PATH", fields.signinPath);
     set("OAUTH_BUTTON_TEST_ID", fields.buttonTestId);
     set("OAUTH_POST_LOGIN_URL", fields.postLoginUrl);
     saveEnv();
@@ -154,6 +156,8 @@ export default function ConfigPanel(): React.JSX.Element {
     "BASE_ENV", "NODE_ENV", "BROWSER", "CHROME_ARGS",
     "CUCUMBER_REPORT_PATH", "CODEGEN_OUTPUT_PATH",
     "RETAIN_VIDEO_ON_SUCCESS", "VITE_BUILD_ENVIRONMENT",
+    // LLM provider settings
+    "SPECWRIGHT_LLM_PROVIDER", "SPECWRIGHT_LLM_BASE_URL", "SPECWRIGHT_MODEL", "SPECWRIGHT_LLM_API_KEY",
   ]);
 
   const customVars = Object.entries(envVars).filter(([k]) => !managedKeys.has(k));
@@ -414,9 +418,8 @@ export default function ConfigPanel(): React.JSX.Element {
                         >
                           ⚙
                           <span
-                            className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-slate-800 ${
-                              isConfigured ? "bg-green-400" : "bg-red-400 animate-pulse"
-                            }`}
+                            className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-slate-800 ${isConfigured ? "bg-green-400" : "bg-red-400 animate-pulse"
+                              }`}
                           />
                         </button>
                       </div>
@@ -436,6 +439,85 @@ export default function ConfigPanel(): React.JSX.Element {
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* LLM Provider settings */}
+              <div className="space-y-2">
+                <label className="block text-slate-300 text-xs mb-1">LLM Provider</label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={(envVars.SPECWRIGHT_LLM_PROVIDER as string) ?? "anthropic"}
+                    onChange={(e) => { setEnvVar("SPECWRIGHT_LLM_PROVIDER", e.target.value); saveEnv(); }}
+                    className="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="anthropic">Anthropic (claude)</option>
+                    <option value="openai">OpenAI / OpenAI-compatible</option>
+                    <option value="ollama">Ollama (local)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">Model</label>
+                  <input
+                    type="text"
+                    value={envVars.SPECWRIGHT_MODEL ?? ""}
+                    onChange={(e) => setEnvVar("SPECWRIGHT_MODEL", e.target.value)}
+                    onBlur={saveEnv}
+                    placeholder="e.g. claude-sonnet-4-6 or gpt-4o"
+                    className="w-full bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">Base URL (optional)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={envVars.SPECWRIGHT_LLM_BASE_URL ?? ""}
+                      onChange={(e) => setEnvVar("SPECWRIGHT_LLM_BASE_URL", e.target.value)}
+                      onBlur={saveEnv}
+                      placeholder="http://localhost:11434/v1"
+                      className="flex-1 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
+                    />
+                    <button
+                      onClick={async () => {
+                        const base = (envVars.SPECWRIGHT_LLM_BASE_URL as string) ?? "";
+                        if (!base) {
+                          setVerifyStatus("error");
+                          setVerifyMessage("Base URL empty");
+                          return;
+                        }
+                        setVerifyStatus("verifying");
+                        setVerifyMessage(null);
+                        const result = await window.specwright.network.verifyEndpoint(base);
+                        setVerifyStatus(result.ok ? "ok" : "error");
+                        setVerifyMessage(result.message);
+                      }}
+                      className="px-2 py-1.5 text-slate-200 bg-slate-700 border border-slate-600 hover:border-brand-500 rounded text-xs"
+                    >
+                      {verifyStatus === "verifying" ? "Verifying..." : "Verify"}
+                    </button>
+                  </div>
+                  {verifyStatus === "ok" && (
+                    <p className="text-green-400 text-xxs mt-1">{verifyMessage}</p>
+                  )}
+                  {verifyStatus === "error" && (
+                    <p className="text-red-400 text-xxs mt-1">{verifyMessage}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">API Key (optional)</label>
+                  <input
+                    type="password"
+                    value={envVars.SPECWRIGHT_LLM_API_KEY ?? ""}
+                    onChange={(e) => setEnvVar("SPECWRIGHT_LLM_API_KEY", e.target.value)}
+                    onBlur={saveEnv}
+                    placeholder="API key for provider (if required)"
+                    className="w-full bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+                <p className="text-slate-500 text-xxs mt-1">Tip: voor lokale testing kun je "Ollama" kiezen en de standaard URL <span className="font-mono">http://localhost:11434/v1</span> gebruiken. Als je een lokale gateway draait (OpenRouter, LocalAI), vul dan de base URL en (optioneel) API key in.</p>
               </div>
 
               {/* Test Execution Settings */}
@@ -480,7 +562,7 @@ export default function ConfigPanel(): React.JSX.Element {
                   <select
                     value={
                       envVars.ENABLE_VIDEO_RECORDING !== "true" ? "off" :
-                      envVars.RETAIN_VIDEO_ON_SUCCESS === "true" ? "always" : "failure"
+                        envVars.RETAIN_VIDEO_ON_SUCCESS === "true" ? "always" : "failure"
                     }
                     onChange={(e) => {
                       const val = e.target.value;

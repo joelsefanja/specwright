@@ -138,6 +138,19 @@ export class ClaudeAgentRunner {
       onExplore,
     } = options;
 
+    // Respect the same env-based overrides as AiSdkRunner so both runners
+    // can be configured from the desktop UI. This will prefer an explicit
+    // SPECWRIGHT_MODEL env var and logs the provider selection.
+    const envProvider = (process.env.SPECWRIGHT_LLM_PROVIDER ?? "anthropic").toLowerCase();
+    const envModel = process.env.SPECWRIGHT_MODEL ?? model;
+    const envBaseUrl = process.env.SPECWRIGHT_LLM_BASE_URL;
+    if (envProvider !== "anthropic") {
+      onLog?.(`[claude-runner] SPECWRIGHT_LLM_PROVIDER=${envProvider} — running ClaudeAgentRunner but provider differs`);
+    }
+    if (envModel && envModel !== model) {
+      onLog?.(`[claude-runner] Overriding model: ${model} -> ${envModel}`);
+    }
+
     this.abortCtrl = new AbortController();
     this.lastRunOptions = options;
     let fullText = "";
@@ -166,7 +179,7 @@ export class ClaudeAgentRunner {
         options: {
           systemPrompt,
           cwd: cwd ?? process.cwd(),
-          model,
+          model: envModel,
           abortController: this.abortCtrl,
           includePartialMessages: true,
           includeHookEvents: true,
@@ -189,9 +202,9 @@ export class ClaudeAgentRunner {
           allowedTools: skipPermissions
             ? undefined  // all tools auto-approved when skip permissions is on
             : (allowedTools ?? [
-                "Read", "Glob", "Grep", "Agent", "Skill", "ToolSearch",
-                "Write", "Edit",
-              ]),
+              "Read", "Glob", "Grep", "Agent", "Skill", "ToolSearch",
+              "Write", "Edit",
+            ]),
 
           // Permission callback — ALWAYS provide to handle MCP consent flows.
           // When skipPermissions is on, auto-approve everything including MCP tools.

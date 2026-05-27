@@ -54,6 +54,10 @@ interface ShellAPI {
   openUrl: (url: string) => Promise<void>;
 }
 
+interface NetworkAPI {
+  verifyEndpoint: (baseUrl: string) => Promise<{ ok: boolean; message: string }>;
+}
+
 interface ReportAPI {
   checkAvailable: (projectPath: string) => Promise<{ playwright: boolean; bdd: boolean }>;
   openPlaywright: (projectPath: string) => Promise<void>;
@@ -108,6 +112,7 @@ interface SpecwrightAPI {
     openLog: () => Promise<boolean>;
   };
   shell: ShellAPI;
+  network: NetworkAPI;
   report: ReportAPI;
   app: {
     getVersion: () => Promise<string>;

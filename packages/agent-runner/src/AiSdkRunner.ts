@@ -18,13 +18,14 @@ const dynamicImport = new Function("specifier", "return import(specifier)") as (
   specifier: string
 ) => Promise<unknown>;
 
+// Type-only import for the Vercel AI SDK — erased at compile time, no ESM issue.
+import type { LanguageModel } from "ai";
+
 export interface AiSdkRunOptions {
   /** System prompt for the pipeline */
   systemPrompt: string;
   /** User message (instructions + env vars) */
   userMessage: string;
-  /** Working directory */
-  cwd?: string;
   /** Model override (default: claude-sonnet-4-6) */
   model?: string;
   /** Additional MCP server configs (e.g., project-specific servers from .mcp.json) */
@@ -39,8 +40,6 @@ export interface AiSdkRunOptions {
   onToken: (token: string) => void;
   /** Called for log messages */
   onLog?: (line: string) => void;
-  /** Called when a tool starts */
-  onToolStart?: (toolName: string) => void;
   /** Called when a tool ends */
   onToolEnd?: (toolName: string, durationMs: number) => void;
   /** Called when a step (LLM turn) finishes, with token usage */
@@ -68,7 +67,6 @@ export class AiSdkRunner {
       maxSteps = 50,
       onToken,
       onLog,
-      onToolStart,
       onToolEnd,
       onStepFinish,
     } = options;
@@ -93,7 +91,47 @@ export class AiSdkRunner {
     const { createMCPClient } = mcpMod;
     const { StdioClientTransport } = mcpSdkMod;
 
-    const aiModel = anthropic(model);
+    // Provider factory: allow switching LLM backend via env
+    const provider = (process.env.SPECWRIGHT_LLM_PROVIDER ?? "anthropic").toLowerCase();
+    const baseURL = process.env.SPECWRIGHT_LLM_BASE_URL;
+    const modelName = process.env.SPECWRIGHT_MODEL ?? model;
+
+    let aiModel: LanguageModel;
+    const providerOptions: Record<string, any> = {};
+
+    if (provider === "openai" || provider === "ollama") {
+      let openaiMod: any = null;
+      try {
+        openaiMod = await dynamicImport("@ai-sdk/openai");
+      } catch {
+        // some installs may not include the provider package; fall back to ai runtime
+      }
+
+      const openaiFactory = (openaiMod && (openaiMod.openai ?? openaiMod.default)) || (aiMod as any).openai;
+
+      const opts: any = {};
+      if (baseURL) opts.baseURL = baseURL;
+      if (process.env.SPECWRIGHT_LLM_API_KEY) opts.apiKey = process.env.SPECWRIGHT_LLM_API_KEY;
+      if (provider === "ollama") {
+        opts.baseURL = opts.baseURL ?? "http://localhost:11434/v1";
+        opts.apiKey = opts.apiKey ?? "ollama";
+      }
+
+      if (openaiFactory) {
+        try {
+          aiModel = openaiFactory(modelName, opts);
+        } catch {
+          aiModel = openaiFactory(modelName);
+        }
+      } else {
+        aiModel = anthropic(modelName);
+      }
+
+      providerOptions.openai = { baseURL: opts.baseURL, apiKey: opts.apiKey };
+    } else {
+      aiModel = anthropic(modelName);
+      providerOptions.anthropic = { cacheControl: { type: "ephemeral" } };
+    }
 
     // Collect all tools from MCP servers
     let allTools: Record<string, unknown> = {};
@@ -137,10 +175,7 @@ export class AiSdkRunner {
     }
 
     onLog?.(`[ai-sdk] Total tools available: ${Object.keys(allTools).length}`);
-    onLog?.(`[ai-sdk] Starting pipeline with ${model}…`);
-
-    // Track tool timings
-    const toolStartTimes = new Map<string, number>();
+    onLog?.(`[ai-sdk] Starting pipeline with ${modelName}…`);
 
     try {
       const result = streamText({
@@ -149,12 +184,7 @@ export class AiSdkRunner {
         messages: [{ role: "user" as const, content: userMessage }],
         tools: allTools as Parameters<typeof streamText>[0]["tools"],
         stopWhen: stepCountIs(maxSteps) as Parameters<typeof streamText>[0]["stopWhen"],
-        providerOptions: {
-          anthropic: {
-            // Enable prompt caching on stable system prompt prefix
-            cacheControl: { type: "ephemeral" },
-          },
-        },
+        providerOptions: providerOptions,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onStepFinish: async (event: any) => {
           const toolCalls = (event.toolCalls as Array<{ toolName: string }>) ?? [];

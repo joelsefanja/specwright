@@ -136,6 +136,11 @@ contextBridge.exposeInMainWorld("specwright", {
     installUpdate: () => ipcRenderer.invoke("app:install-update"),
   },
 
+  network: {
+    verifyEndpoint: (baseUrl: string) =>
+      ipcRenderer.invoke("network:verify", baseUrl) as Promise<{ ok: boolean; message: string }>,
+  },
+
   report: {
     checkAvailable: (projectPath: string) =>
       ipcRenderer.invoke("report:check-available", projectPath) as Promise<{ playwright: boolean; bdd: boolean }>,

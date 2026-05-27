@@ -7,6 +7,7 @@ import { registerConfigIpc } from "./ipc/config.ipc";
 import { registerProjectIpc } from "./ipc/project.ipc";
 import { registerPipelineIpc } from "./ipc/pipeline.ipc";
 import { registerAtlassianIpc } from "./ipc/atlassian.ipc";
+import { registerNetworkIpc } from "./ipc/network.ipc";
 import { registerReportIpc } from "./ipc/report.ipc";
 import { initLogger, closeLogger, log, getLogFilePath, isLoggingEnabled, setLoggingEnabled } from "./logger";
 
@@ -187,6 +188,7 @@ app.whenReady().then(async () => {
   registerProjectIpc(configService, projectService, () => mainWindow);
   registerPipelineIpc(configService, projectService, () => mainWindow);
   registerAtlassianIpc();
+  registerNetworkIpc();
   registerReportIpc();
 
   // Open a URL in the system default browser
