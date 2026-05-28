@@ -8,8 +8,9 @@ import { registerProjectIpc } from "./ipc/project.ipc";
 import { registerPipelineIpc } from "./ipc/pipeline.ipc";
 import { registerAtlassianIpc } from "./ipc/atlassian.ipc";
 import { registerNetworkIpc } from "./ipc/network.ipc";
+import { registerOpencodeIpc } from "./ipc/opencode.ipc";
 import { registerReportIpc } from "./ipc/report.ipc";
-import { initLogger, closeLogger, log, getLogFilePath, isLoggingEnabled, setLoggingEnabled } from "./logger";
+import { initLogger, closeLogger, log, getLogFilePath, isLoggingEnabled, setLoggingEnabled, clearLocalLogs } from "./logger";
 
 // Suppress EPIPE errors from aborted pipeline processes — these are expected
 // when the user clicks Abort and the SDK process is killed mid-write.
@@ -136,6 +137,13 @@ function buildMenu(): void {
             }
           },
         },
+        {
+          label: "Clear Old Logs",
+          enabled: !!getLogFilePath(),
+          click(): void {
+            clearLocalLogs();
+          },
+        },
         { type: "separator" },
         { role: "toggleDevTools" },
       ],
@@ -190,6 +198,7 @@ app.whenReady().then(async () => {
   registerAtlassianIpc();
   registerNetworkIpc();
   registerReportIpc();
+  registerOpencodeIpc();
 
   // Open a URL in the system default browser
   const { ipcMain } = await import("electron");

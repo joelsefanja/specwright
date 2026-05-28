@@ -631,6 +631,27 @@ export class ProjectService {
     };
   }
 
+  listAuthStrategies(projectPath: string): string[] {
+    const strategies = new Set(["oauth", "email-password"]);
+    const dir = path.join(projectPath, "e2e-tests/playwright/auth-strategies");
+
+    if (fs.existsSync(dir)) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+        strategies.add(path.basename(entry.name, ".js"));
+      }
+    }
+
+    strategies.delete("none");
+    return Array.from(strategies).sort((a, b) => {
+      const order = ["oauth", "email-password"];
+      const ai = order.indexOf(a);
+      const bi = order.indexOf(b);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? order.length : ai) - (bi === -1 ? order.length : bi);
+      return a.localeCompare(b);
+    });
+  }
+
   // ── Templates ─────────────────────────────────────────────────────────────
 
   /** Read example templates from instructions.example.js */

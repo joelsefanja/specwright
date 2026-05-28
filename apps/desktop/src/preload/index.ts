@@ -14,6 +14,17 @@ contextBridge.exposeInMainWorld("specwright", {
     pickFiles: () => ipcRenderer.invoke("project:pick-files") as Promise<string[]>,
     uploadTestFile: (sourcePath: string) =>
       ipcRenderer.invoke("project:upload-test-file", sourcePath) as Promise<string>,
+    fetchGitLabIssue: (folderPath: string, issueRef: string) =>
+      ipcRenderer.invoke("project:fetch-gitlab-issue", folderPath, issueRef) as Promise<{
+        filePath: string; title: string; updatedAt: string; changed: boolean;
+      }>,
+    listGitLabItems: (folderPath: string) =>
+      ipcRenderer.invoke("project:list-gitlab-items", folderPath) as Promise<{
+        repo: string;
+        username?: string | null;
+        items: Array<{ kind: "issue" | "work_item"; iid: string; title: string; state?: string; updatedAt?: string; webUrl?: string; ref: string; assignedToMe?: boolean }>;
+        errors: string[];
+      }>,
     bootstrap: (folderPath: string, options?: { skipAuth?: boolean; authStrategy?: string; overlay?: { type: "local"; dirPath: string } | { type: "npm"; packageName: string; registry?: string } }) =>
       ipcRenderer.invoke("project:bootstrap", folderPath, options),
     validatePlugin: (dirPath: string) =>
@@ -23,6 +34,8 @@ contextBridge.exposeInMainWorld("specwright", {
         name: string; version: string; authStrategy: string;
         hasOverlay: boolean; overlayName?: string;
       }>,
+    listAuthStrategies: (folderPath: string) =>
+      ipcRenderer.invoke("project:list-auth-strategies", folderPath) as Promise<string[]>,
     getPath: () => ipcRenderer.invoke("project:get-path"),
     setPath: (p: string) => ipcRenderer.invoke("project:set-path", p),
     isBootstrapped: (p: string) => ipcRenderer.invoke("project:is-bootstrapped", p),
@@ -108,6 +121,8 @@ contextBridge.exposeInMainWorld("specwright", {
       ipcRenderer.invoke("pipeline:get-log-path") as Promise<string | null>,
     openLog: () =>
       ipcRenderer.invoke("pipeline:open-log") as Promise<boolean>,
+    clearLogs: () =>
+      ipcRenderer.invoke("pipeline:clear-logs") as Promise<number>,
   },
 
   atlassian: {
@@ -139,6 +154,21 @@ contextBridge.exposeInMainWorld("specwright", {
   network: {
     verifyEndpoint: (baseUrl: string) =>
       ipcRenderer.invoke("network:verify", baseUrl) as Promise<{ ok: boolean; message: string }>,
+  },
+
+  opencode: {
+    health: (baseUrl: string) =>
+      ipcRenderer.invoke("opencode:health", baseUrl) as Promise<{ ok: boolean }>,
+    detectModel: (baseUrl: string) =>
+      ipcRenderer.invoke("opencode:detect-model", baseUrl) as Promise<{ modelId: string; providerId: string } | null>,
+    listProviders: (baseUrl: string) =>
+      ipcRenderer.invoke("opencode:list-providers", baseUrl) as Promise<{ default: Record<string, string>; connected: string[] } | null>,
+    startServer: (port?: number) =>
+      ipcRenderer.invoke("opencode:start-server", port ?? 18789) as Promise<{ ok: boolean; error?: string }>,
+    stopServer: () =>
+      ipcRenderer.invoke("opencode:stop-server") as Promise<{ ok: boolean }>,
+    serverStatus: () =>
+      ipcRenderer.invoke("opencode:server-status") as Promise<{ running: boolean }>,
   },
 
   report: {

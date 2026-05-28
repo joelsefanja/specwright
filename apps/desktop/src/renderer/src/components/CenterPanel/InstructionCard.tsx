@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
+import { useConfigStore } from "@renderer/store/config.store";
 import { useInstructionStore, type InstructionCard as ICard } from "@renderer/store/instruction.store";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
 
@@ -19,7 +20,13 @@ export default function InstructionCard({ card, index }: Props): React.JSX.Eleme
     useInstructionStore();
   const atlassianStatus = usePipelineStore((s) => s.atlassianStatus);
   const setMcpStatus = usePipelineStore((s) => s.setMcpStatus);
+  const showJiraSource = useConfigStore((s) => s.envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true");
   const [connecting, setConnecting] = useState(false);
+  const [gitlabIssueRef, setGitlabIssueRef] = useState("");
+  const [gitlabStatus, setGitlabStatus] = useState<string | null>(null);
+  const [fetchingGitlab, setFetchingGitlab] = useState(false);
+  const [loadingGitlabItems, setLoadingGitlabItems] = useState(false);
+  const [gitlabItems, setGitlabItems] = useState<GitLabItem[]>([]);
 
   useEffect(() => {
     window.specwright.atlassian.status().then(({ status }) => {
@@ -54,12 +61,64 @@ export default function InstructionCard({ card, index }: Props): React.JSX.Eleme
 
   const hasJira = Boolean(card.jiraURL?.trim());
   const hasFile = Boolean(card.filePath?.trim());
+  const assignedGitLabItems = gitlabItems.filter((item) => item.assignedToMe);
+  const otherGitLabItems = gitlabItems.filter((item) => !item.assignedToMe);
 
   const handleUploadFile = useCallback(async () => {
     const selected = await window.specwright.project.pickFiles();
     if (selected.length > 0) {
       const relativePath = await window.specwright.project.uploadTestFile(selected[0]);
       update({ filePath: relativePath, jiraURL: "" });
+    }
+  }, [update]);
+
+  const handleFetchGitLabIssue = useCallback(async () => {
+    const projectPath = await window.specwright.project.getPath();
+    if (!projectPath || !gitlabIssueRef.trim()) return;
+    setFetchingGitlab(true);
+    setGitlabStatus(null);
+    try {
+      const result = await window.specwright.project.fetchGitLabIssue(projectPath, gitlabIssueRef.trim());
+      update({ filePath: result.filePath, jiraURL: "" });
+      setGitlabStatus(result.changed ? "Issue updated since last fetch" : `Fetched: ${result.title}`);
+    } catch (error) {
+      setGitlabStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFetchingGitlab(false);
+    }
+  }, [gitlabIssueRef, update]);
+
+  const handleLoadGitLabItems = useCallback(async () => {
+    const projectPath = await window.specwright.project.getPath();
+    if (!projectPath) return;
+    setLoadingGitlabItems(true);
+    setGitlabStatus(null);
+    try {
+      const items = await window.specwright.project.listGitLabItems(projectPath);
+      setGitlabItems(items.items);
+      const suffix = items.errors.length ? ` (${items.errors.join("; ")})` : "";
+      const userLabel = items.username ? ` for @${items.username}` : "";
+      setGitlabStatus(items.items.length ? `Loaded ${items.items.length} GitLab items from ${items.repo}${userLabel}${suffix}` : `No GitLab items found for ${items.repo}${suffix}`);
+    } catch (error) {
+      setGitlabStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingGitlabItems(false);
+    }
+  }, []);
+
+  const handleSelectGitLabItem = useCallback(async (item: GitLabItem) => {
+    const projectPath = await window.specwright.project.getPath();
+    if (!projectPath) return;
+    setFetchingGitlab(true);
+    setGitlabStatus(null);
+    try {
+      const result = await window.specwright.project.fetchGitLabIssue(projectPath, item.ref);
+      update({ filePath: result.filePath, jiraURL: "" });
+      setGitlabStatus(result.changed ? "Issue updated since last fetch" : `Fetched: ${result.title}`);
+    } catch (error) {
+      setGitlabStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFetchingGitlab(false);
     }
   }, [update]);
 
@@ -210,10 +269,76 @@ export default function InstructionCard({ card, index }: Props): React.JSX.Eleme
         {hasJira && (
           <p className="text-amber-500 text-[10px] mt-1">Disabled — Jira URL is set. Clear Jira URL to use a file.</p>
         )}
+        {!hasJira && !hasFile && (
+          <div className="mt-2 space-y-1.5">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={gitlabIssueRef}
+                onChange={(e) => setGitlabIssueRef(e.target.value)}
+                placeholder="GitLab issue URL, group/project#123, or 123"
+                className="flex-1 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500 placeholder-slate-600"
+              />
+              <button
+                onClick={handleFetchGitLabIssue}
+                disabled={fetchingGitlab || !gitlabIssueRef.trim()}
+                className="text-xs px-2 py-1.5 rounded bg-slate-700 border border-slate-600 hover:border-brand-500 text-slate-300 disabled:opacity-40"
+              >
+                {fetchingGitlab ? "..." : "Fetch GitLab"}
+              </button>
+              <button
+                onClick={handleLoadGitLabItems}
+                disabled={loadingGitlabItems}
+                className="text-xs px-2 py-1.5 rounded bg-slate-700 border border-slate-600 hover:border-brand-500 text-slate-300 disabled:opacity-40"
+              >
+                {loadingGitlabItems ? "..." : "List"}
+              </button>
+            </div>
+            {gitlabItems.length > 0 && (
+              <div className="max-h-36 overflow-y-auto rounded border border-slate-700 bg-slate-900/60">
+                {assignedGitLabItems.length > 0 && (
+                  <div>
+                    <div className="px-2 py-1 bg-brand-950/70 border-b border-brand-800 text-brand-300 text-[10px] font-semibold uppercase tracking-wide">
+                      My assigned items
+                    </div>
+                    {assignedGitLabItems.map((item) => (
+                      <button
+                        key={`${item.kind}-${item.iid}`}
+                        onClick={() => handleSelectGitLabItem(item)}
+                        className="block w-full text-left px-2 py-1.5 hover:bg-brand-950/50 border-b border-slate-800 border-l-2 border-l-brand-500"
+                      >
+                        <span className="text-brand-300 text-[10px] uppercase mr-1">{item.kind === "work_item" ? "WI" : "ISS"} #{item.iid}</span>
+                        <span className="text-slate-100 text-xs">{item.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {otherGitLabItems.length > 0 && (
+                  <div>
+                    <div className="px-2 py-1 bg-slate-800/80 border-b border-slate-700 text-slate-400 text-[10px] font-semibold uppercase tracking-wide">
+                      Other project items
+                    </div>
+                    {otherGitLabItems.map((item) => (
+                      <button
+                        key={`${item.kind}-${item.iid}`}
+                        onClick={() => handleSelectGitLabItem(item)}
+                        className="block w-full text-left px-2 py-1.5 hover:bg-slate-800 border-b border-slate-800 last:border-b-0"
+                      >
+                        <span className="text-slate-400 text-[10px] uppercase mr-1">{item.kind === "work_item" ? "WI" : "ISS"} #{item.iid}</span>
+                        <span className="text-slate-200 text-xs">{item.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {gitlabStatus && <p className="text-slate-500 text-[10px]">{gitlabStatus}</p>}
+          </div>
+        )}
       </div>
 
       {/* Jira URL */}
-      <div>
+      {showJiraSource && <div>
         <label className="block text-slate-400 text-xs mb-1">
           Jira URL <span className="text-slate-600">— optional</span>
         </label>
@@ -277,7 +402,7 @@ export default function InstructionCard({ card, index }: Props): React.JSX.Eleme
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Steps / Instructions */}
       <div>

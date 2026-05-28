@@ -64,14 +64,34 @@ interface ReportAPI {
   openBdd: (projectPath: string) => Promise<void>;
 }
 
+interface OpenCodeProviderData {
+  all?: Array<{ id: string; models?: Record<string, unknown> }>;
+  default: Record<string, string>;
+  connected: string[];
+}
+
+interface GitLabItem {
+  kind: "issue" | "work_item";
+  iid: string;
+  title: string;
+  state?: string;
+  updatedAt?: string;
+  webUrl?: string;
+  ref: string;
+  assignedToMe?: boolean;
+}
+
 interface SpecwrightAPI {
   project: {
     pickFolder: () => Promise<string | null>;
     pickFiles: () => Promise<string[]>;
     uploadTestFile: (sourcePath: string) => Promise<string>;
+    fetchGitLabIssue: (folderPath: string, issueRef: string) => Promise<{ filePath: string; title: string; updatedAt: string; changed: boolean }>;
+    listGitLabItems: (folderPath: string) => Promise<{ repo: string; username?: string | null; items: GitLabItem[]; errors: string[] }>;
     bootstrap: (folderPath: string, options?: { skipAuth?: boolean; authStrategy?: string; overlay?: PluginSource }) => Promise<BootstrapResult>;
     validatePlugin: (dirPath: string) => Promise<PluginValidationResult>;
     detectPlugin: (folderPath: string) => Promise<PluginInfo>;
+    listAuthStrategies: (folderPath: string) => Promise<string[]>;
     getPath: () => Promise<string>;
     setPath: (p: string) => Promise<void>;
     isBootstrapped: (p: string) => Promise<boolean>;
@@ -110,10 +130,19 @@ interface SpecwrightAPI {
     onMcpStatus: (cb: (data: { server: string; status: string }) => void) => () => void;
     getLogPath: () => Promise<string | null>;
     openLog: () => Promise<boolean>;
+    clearLogs: () => Promise<number>;
   };
   shell: ShellAPI;
   network: NetworkAPI;
   report: ReportAPI;
+  opencode: {
+    health: (baseUrl: string) => Promise<{ ok: boolean }>;
+    detectModel: (baseUrl: string) => Promise<{ modelId: string; providerId: string } | null>;
+    listProviders: (baseUrl: string) => Promise<OpenCodeProviderData | null>;
+    startServer: (port?: number) => Promise<{ ok: boolean; error?: string }>;
+    stopServer: () => Promise<{ ok: boolean }>;
+    serverStatus: () => Promise<{ running: boolean }>;
+  };
   app: {
     getVersion: () => Promise<string>;
     onUpdateAvailable: (cb: (data: { version: string }) => void) => () => void;

@@ -84,6 +84,24 @@ export function getLogFilePath(): string | null {
   return _logFilePath;
 }
 
+export function clearLocalLogs(): number {
+  let removed = 0;
+  try {
+    const logsDir = app.getPath("logs");
+    for (const entry of fs.readdirSync(logsDir)) {
+      if (!entry.startsWith("specwright-") || !entry.endsWith(".log")) continue;
+      const fullPath = path.join(logsDir, entry);
+      if (fullPath === _logFilePath) continue;
+      fs.unlinkSync(fullPath);
+      removed += 1;
+    }
+    log(`[logger] Cleared ${removed} old log file(s)`);
+  } catch (err) {
+    log(`[logger] Failed to clear logs: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return removed;
+}
+
 /** Return whether file logging is currently enabled. */
 export function isLoggingEnabled(): boolean {
   return _enabled;

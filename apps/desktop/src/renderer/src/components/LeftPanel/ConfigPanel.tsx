@@ -3,6 +3,7 @@ import { useConfigStore } from "@renderer/store/config.store";
 import { AuthSettingsModal, EMPTY_AUTH, isOAuthConfigured, isEmailPasswordConfigured } from "./AuthSettingsModal";
 import type { AuthFields } from "./AuthSettingsModal";
 import { PluginPickerModal } from "./PluginPickerModal";
+import { OpenCodeConfigModal } from "./OpenCodeConfigModal";
 
 const ENVS = ["qat", "dev", "staging", "prod", "local"];
 
@@ -40,6 +41,13 @@ export default function ConfigPanel(): React.JSX.Element {
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [verifyStatus, setVerifyStatus] = useState<"idle" | "verifying" | "ok" | "error">("idle");
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
+  const [showOcModal, setShowOcModal] = useState(false);
+  const [ocStatus, setOcStatus] = useState<"idle" | "checking" | "connected" | "error">("idle");
+  const [ocModel, setOcModel] = useState<string | null>(null);
+  const [ocServerRunning, setOcServerRunning] = useState(false);
+  const [ocStarting, setOcStarting] = useState(false);
+  const [authStrategies, setAuthStrategies] = useState<string[]>(["oauth", "email-password"]);
+
 
   useEffect(() => {
     window.specwright.app.getVersion().then(setAppVersion).catch(() => null);
@@ -47,12 +55,19 @@ export default function ConfigPanel(): React.JSX.Element {
     return off;
   }, []);
 
+  useEffect(() => {
+    if ((envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode") return;
+    window.specwright.opencode.serverStatus().then((s) => setOcServerRunning(s.running));
+  }, [envVars.SPECWRIGHT_LLM_PROVIDER]);
+
   const authStrategy = (envVars.AUTH_STRATEGY || "none") as string;
   const authRequired = authStrategy !== "none";
+  const usesBuiltInAuthSettings = authStrategy === "oauth" || authStrategy === "email-password";
 
   useEffect(() => {
     if (!projectPath || !loaded) return;
     window.specwright.project.detectPlugin(projectPath).then(setPluginInfo).catch(() => null);
+    window.specwright.project.listAuthStrategies(projectPath).then(setAuthStrategies).catch(() => null);
   }, [projectPath, loaded]);
 
   useEffect(() => {
@@ -69,11 +84,13 @@ export default function ConfigPanel(): React.JSX.Element {
     });
   }, [projectPath, loaded, envVars]);
 
-  const isConfigured = authRequired
-    ? authStrategy === "oauth"
+  const isConfigured = !authRequired
+    ? true
+    : authStrategy === "oauth"
       ? isOAuthConfigured(authFields)
-      : isEmailPasswordConfigured(authFields)
-    : true;
+      : authStrategy === "email-password"
+        ? isEmailPasswordConfigured(authFields)
+        : true;
 
   const handleAuthToggle = (checked: boolean): void => {
     if (!checked) {
@@ -91,7 +108,9 @@ export default function ConfigPanel(): React.JSX.Element {
   const handleAuthStrategyChange = (strategy: string): void => {
     setEnvVar("AUTH_STRATEGY", strategy);
     saveEnv();
-    setShowAuthModal(true);
+    if (strategy === "oauth" || strategy === "email-password") {
+      setShowAuthModal(true);
+    }
   };
 
   const handleSaveAuth = (fields: AuthFields): void => {
@@ -158,6 +177,7 @@ export default function ConfigPanel(): React.JSX.Element {
     "RETAIN_VIDEO_ON_SUCCESS", "VITE_BUILD_ENVIRONMENT",
     // LLM provider settings
     "SPECWRIGHT_LLM_PROVIDER", "SPECWRIGHT_LLM_BASE_URL", "SPECWRIGHT_MODEL", "SPECWRIGHT_LLM_API_KEY",
+    "SPECWRIGHT_OPENCODE_URL", "SPECWRIGHT_OPENCODE_VARIANT",
   ]);
 
   const customVars = Object.entries(envVars).filter(([k]) => !managedKeys.has(k));
@@ -178,6 +198,23 @@ export default function ConfigPanel(): React.JSX.Element {
           onClose={() => setShowPluginModal(false)}
           onApply={handleApplyPlugin}
           onReset={() => setPendingPlugin(null)}
+        />
+      )}
+      {showOcModal && (
+        <OpenCodeConfigModal
+          initialUrl={(envVars.SPECWRIGHT_OPENCODE_URL as string) || "http://127.0.0.1:18789"}
+          initialModel={(envVars.SPECWRIGHT_MODEL as string) || ""}
+          initialVariant={(envVars.SPECWRIGHT_OPENCODE_VARIANT as string) || "low"}
+          onSave={(url, model, variant) => {
+            setEnvVar("SPECWRIGHT_OPENCODE_URL", url);
+            setEnvVar("SPECWRIGHT_MODEL", model);
+            setEnvVar("SPECWRIGHT_OPENCODE_VARIANT", variant);
+            saveEnv();
+            setOcStatus("connected");
+            setOcModel(model);
+            setShowOcModal(false);
+          }}
+          onClose={() => setShowOcModal(false)}
         />
       )}
 
@@ -407,25 +444,32 @@ export default function ConfigPanel(): React.JSX.Element {
                           onChange={(e) => handleAuthStrategyChange(e.target.value)}
                           className="flex-1 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
                         >
-                          <option value="oauth">OAuth</option>
-                          <option value="email-password">Email + Password</option>
+                          {authStrategies.map((strategy) => (
+                            <option key={strategy} value={strategy}>{strategy}</option>
+                          ))}
                         </select>
 
-                        <button
-                          onClick={() => setShowAuthModal(true)}
-                          title="Configure auth settings"
-                          className="relative flex-shrink-0 w-7 h-7 flex items-center justify-center rounded bg-slate-700 border border-slate-600 hover:border-brand-500 text-slate-400 hover:text-brand-400 transition-colors"
-                        >
-                          ⚙
-                          <span
-                            className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-slate-800 ${isConfigured ? "bg-green-400" : "bg-red-400 animate-pulse"
-                              }`}
-                          />
-                        </button>
+                        {usesBuiltInAuthSettings && (
+                          <button
+                            onClick={() => setShowAuthModal(true)}
+                            title="Configure auth settings"
+                            className="relative flex-shrink-0 w-7 h-7 flex items-center justify-center rounded bg-slate-700 border border-slate-600 hover:border-brand-500 text-slate-400 hover:text-brand-400 transition-colors"
+                          >
+                            ⚙
+                            <span
+                              className={`absolute -top-1 -right-1 w-2 h-2 rounded-full border border-slate-800 ${isConfigured ? "bg-green-400" : "bg-red-400 animate-pulse"
+                                }`}
+                            />
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {isConfigured ? (
+                    {!usesBuiltInAuthSettings ? (
+                      <p className="text-slate-500 text-xs">
+                        ● Custom strategy from auth-strategies/{authStrategy}.js
+                      </p>
+                    ) : isConfigured ? (
                       <p className="text-slate-500 text-xs">
                         ● Configured as <span className="text-slate-300">{authFields.userEmail}</span>
                       </p>
@@ -447,12 +491,47 @@ export default function ConfigPanel(): React.JSX.Element {
                 <div className="flex items-center gap-2">
                   <select
                     value={(envVars.SPECWRIGHT_LLM_PROVIDER as string) ?? "anthropic"}
-                    onChange={(e) => { setEnvVar("SPECWRIGHT_LLM_PROVIDER", e.target.value); saveEnv(); }}
+                    onChange={async (e) => {
+                      const provider = e.target.value;
+                      setEnvVar("SPECWRIGHT_LLM_PROVIDER", provider);
+                      if (provider === "opencode") {
+                        if (!envVars.SPECWRIGHT_OPENCODE_URL) setEnvVar("SPECWRIGHT_OPENCODE_URL", "http://127.0.0.1:18789");
+                        if (!envVars.SPECWRIGHT_OPENCODE_VARIANT) setEnvVar("SPECWRIGHT_OPENCODE_VARIANT", "low");
+                        setEnvVar("SPECWRIGHT_MODEL", "gpt-5.5");
+                        saveEnv();
+                        setOcStatus("checking");
+                        setOcStarting(true);
+                        const url = (envVars.SPECWRIGHT_OPENCODE_URL as string) || "http://127.0.0.1:18789";
+                        const sr = await window.specwright.opencode.startServer();
+                        setOcServerRunning(sr.ok);
+                        if (sr.ok) {
+                          await new Promise((r) => setTimeout(r, 1500));
+                          const health = await window.specwright.opencode.health(url);
+                          if (health.ok) {
+                            const detected = await window.specwright.opencode.detectModel(url);
+                            if (detected) {
+                              setOcModel(detected.modelId);
+                              setEnvVar("SPECWRIGHT_MODEL", detected.modelId);
+                              saveEnv();
+                            }
+                            setOcStatus("connected");
+                          } else {
+                            setOcStatus("idle");
+                          }
+                        } else {
+                          setOcStatus("error");
+                        }
+                        setOcStarting(false);
+                      } else {
+                        saveEnv();
+                      }
+                    }}
                     className="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
                   >
                     <option value="anthropic">Anthropic (claude)</option>
                     <option value="openai">OpenAI / OpenAI-compatible</option>
                     <option value="ollama">Ollama (local)</option>
+                    <option value="opencode">OpenCode</option>
                   </select>
                 </div>
 
@@ -468,6 +547,77 @@ export default function ConfigPanel(): React.JSX.Element {
                   />
                 </div>
 
+                {/* OpenCode — compact card */}
+                {(envVars.SPECWRIGHT_LLM_PROVIDER as string) === "opencode" && (
+                  <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      ocStatus === "connected" ? "bg-green-400" :
+                      ocStatus === "error" ? "bg-red-400" :
+                      "bg-slate-500"
+                    }`} />
+                    <div
+                      className="min-w-0 flex-1 cursor-pointer"
+                      onClick={() => setShowOcModal(true)}
+                    >
+                      <p className="text-slate-200 text-xs font-medium">OpenCode</p>
+                      <p className="text-slate-500 text-xxs font-mono truncate">
+                        {ocModel || (envVars.SPECWRIGHT_MODEL as string) || "gpt-5.5"}
+                      </p>
+                    </div>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (ocServerRunning) {
+                          await window.specwright.opencode.stopServer();
+                          setOcServerRunning(false);
+                          setOcStatus("idle");
+                        } else {
+                          setOcStarting(true);
+                          const sr = await window.specwright.opencode.startServer();
+                          setOcServerRunning(sr.ok);
+                          if (sr.ok) {
+                            setOcStatus("checking");
+                            await new Promise((r) => setTimeout(r, 1500));
+                            const url = (envVars.SPECWRIGHT_OPENCODE_URL as string) || "http://127.0.0.1:18789";
+                            const health = await window.specwright.opencode.health(url);
+                            if (health.ok) {
+                              const detected = await window.specwright.opencode.detectModel(url);
+                              if (detected) {
+                                setOcModel(detected.modelId);
+                                setEnvVar("SPECWRIGHT_MODEL", detected.modelId);
+                                saveEnv();
+                              }
+                              setOcStatus("connected");
+                            } else {
+                              setOcStatus("idle");
+                            }
+                          }
+                          setOcStarting(false);
+                        }
+                      }}
+                      className="text-slate-500 hover:text-brand-400 text-xs shrink-0 transition-colors"
+                      title={ocServerRunning ? "Stop server" : "Start server"}
+                    >
+                      {ocStarting ? (
+                        <span className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" />
+                      ) : ocServerRunning ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                      ) : (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20" /></svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setShowOcModal(true)}
+                      className="text-slate-500 hover:text-brand-400 text-xs shrink-0 transition-colors"
+                      title="Configure model"
+                    >
+                      ⚙
+                    </button>
+                  </div>
+                )}
+
+                {(envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode" && (
+                <>
                 <div>
                   <label className="block text-slate-400 text-xs mb-1">Base URL (optional)</label>
                   <div className="flex gap-2">
@@ -517,7 +667,9 @@ export default function ConfigPanel(): React.JSX.Element {
                     className="w-full bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
                   />
                 </div>
-                <p className="text-slate-500 text-xxs mt-1">Tip: voor lokale testing kun je "Ollama" kiezen en de standaard URL <span className="font-mono">http://localhost:11434/v1</span> gebruiken. Als je een lokale gateway draait (OpenRouter, LocalAI), vul dan de base URL en (optioneel) API key in.</p>
+                <p className="text-slate-500 text-xxs mt-1">Tip: "Ollama" gebruikt <span className="font-mono">http://localhost:11434/v1</span>. "OpenCode" start je met <span className="font-mono">opencode serve --port 18789</span> — klik de kaart om het model te selecteren.</p>
+                </>
+                )}
               </div>
 
               {/* Test Execution Settings */}
@@ -585,6 +737,16 @@ export default function ConfigPanel(): React.JSX.Element {
                     className={`w-8 h-4 rounded-full transition-colors relative ${envVars.ENABLE_TRACING === "true" ? "bg-brand-600" : "bg-slate-600"}`}
                   >
                     <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${envVars.ENABLE_TRACING === "true" ? "left-4" : "left-0.5"}`} />
+                  </button>
+                </label>
+
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-slate-300 text-xs">Show Jira Source</span>
+                  <button
+                    onClick={() => { setEnvVar("SPECWRIGHT_SHOW_JIRA_SOURCE", envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true" ? "false" : "true"); saveEnv(); }}
+                    className={`w-8 h-4 rounded-full transition-colors relative ${envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true" ? "bg-brand-600" : "bg-slate-600"}`}
+                  >
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true" ? "left-4" : "left-0.5"}`} />
                   </button>
                 </label>
 

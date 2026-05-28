@@ -9,6 +9,7 @@ export default function InstructionsBuilder(): React.JSX.Element {
   const { cards, addCard, clearAll, serialize, loadCards } = useInstructionStore();
   const { status, startRun, setError, atlassianStatus } = usePipelineStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const showJiraSource = envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true";
 
   // isRunning is true while submitting OR while the pipeline store says running
   const isRunning = isSubmitting || status === "running";
@@ -19,7 +20,7 @@ export default function InstructionsBuilder(): React.JSX.Element {
   );
 
   // If any card uses a Jira URL, Atlassian must be connected
-  const hasJiraCard = cards.some((c) => c.jiraURL?.trim());
+  const hasJiraCard = showJiraSource && cards.some((c) => c.jiraURL?.trim());
   const jiraNeedsAuth = hasJiraCard && atlassianStatus !== "connected";
 
   // If auth is oauth and required, email must be filled
