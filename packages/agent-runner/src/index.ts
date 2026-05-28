@@ -7,6 +7,9 @@ export type { AgentRunOptions, PermissionRequest, McpServerConfig } from "./Clau
 export { AiSdkRunner } from "./AiSdkRunner";
 export type { AiSdkRunOptions } from "./AiSdkRunner";
 
+export { SUPPORTED_PROVIDERS, opencodeHealth, opencodeDetectModel } from "./providers/registry";
+export type { LLMProvider, ProviderConfig, DirectGenerateResult } from "./providers/types";
+
 export { PlaywrightMcpClient } from "./PlaywrightMcpClient";
 export type { ExplorationResult, DiscoveredElementGroup, McpToolResult, PlaywrightMcpOptions } from "./PlaywrightMcpClient";
 

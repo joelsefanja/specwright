@@ -43,6 +43,9 @@ importers:
       '@playwright/mcp':
         specifier: ^0.0.75
         version: 0.0.75
+      '@specwright/agent-runner':
+        specifier: workspace:*
+        version: link:../../packages/agent-runner
       '@specwright/plugin':
         specifier: workspace:*
         version: link:../../packages/plugin

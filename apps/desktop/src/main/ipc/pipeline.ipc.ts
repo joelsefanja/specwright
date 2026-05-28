@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow, app } from "electron";
 import { execSync } from "child_process";
-import { log as fileLog, getLogFilePath } from "../logger";
+import { log as fileLog, getLogFilePath, clearLocalLogs } from "../logger";
 // claude-runner is ESM-only — must use dynamic import in Electron's CJS main process
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
 const dynamicImport = new Function("specifier", "return import(specifier)") as (
@@ -25,6 +25,36 @@ async function loadClaudeRunner(): Promise<ClaudeRunnerModule> {
     _claudeRunnerModule = await dynamicImport("claude-runner") as ClaudeRunnerModule;
   }
   return _claudeRunnerModule;
+}
+
+interface AiSdkRunnerModule {
+  AiSdkRunner: new () => {
+    run(options: AiSdkRunOptions): Promise<string>;
+    abort(): void;
+    interrupt(): void;
+  };
+}
+
+interface AiSdkRunOptions {
+  systemPrompt: string;
+  userMessage: string;
+  model?: string;
+  mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+  includePlaywrightMcp?: boolean;
+  playwrightMcpArgs?: string[];
+  maxSteps?: number;
+  onToken: (token: string) => void;
+  onLog?: (line: string) => void;
+  onToolEnd?: (toolName: string, durationMs: number) => void;
+  onStepFinish?: (info: { stepNumber: number; totalTokens: number; toolCalls: string[] }) => void;
+}
+
+let _aiSdkRunnerModule: AiSdkRunnerModule | null = null;
+async function loadAiSdkRunner(): Promise<AiSdkRunnerModule> {
+  if (!_aiSdkRunnerModule) {
+    _aiSdkRunnerModule = await dynamicImport("@specwright/agent-runner") as unknown as AiSdkRunnerModule;
+  }
+  return _aiSdkRunnerModule;
 }
 import type { ConfigService } from "../services/ConfigService";
 import type { ProjectService } from "../services/ProjectService";
@@ -334,15 +364,104 @@ export function registerPipelineIpc(
         line: `[pipeline] MCP servers: ${Object.keys(mcpServers).join(", ")}`,
       });
 
-      win.webContents.send("pipeline:log", { line: `[pipeline] Launching Claude Runner…` });
+      // Determine which provider to use
+      const provider = projectPath
+        ? (projectService.readEnv(projectPath)["SPECWRIGHT_LLM_PROVIDER"] as string ?? "anthropic").toLowerCase()
+        : "anthropic";
 
       pendingPermissions.clear();
 
       try {
         let fullText: string;
 
-        {
+        if (provider === "opencode") {
+          // ── AiSdkRunner + OpenCode direct path ──
+          win.webContents.send("pipeline:log", { line: `[pipeline] Launching OpenCode runner…` });
+
+          // Set env vars so AiSdkRunner can read them
+          const env = projectPath ? projectService.readEnv(projectPath) : {};
+          for (const [k, v] of Object.entries(env)) {
+            if (v) process.env[k] = v;
+          }
+
+          const ocUrl = (env["SPECWRIGHT_OPENCODE_URL"] as string) || "http://127.0.0.1:18789";
+          const port = new URL(ocUrl).port ? parseInt(new URL(ocUrl).port, 10) : 18789;
+
+          // Auto-start opencode server if not running
+          try {
+            const healthRes = await fetch(`${ocUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+            if (!healthRes.ok) throw new Error("not healthy");
+          } catch {
+            win.webContents.send("pipeline:log", { line: `[pipeline] Starting opencode serve on port ${port}…` });
+            const { spawn } = await import("child_process");
+            spawn("opencode", ["serve", "--port", String(port)], {
+              stdio: "ignore",
+              shell: process.platform === "win32",
+              detached: true,
+              cwd: projectPath ?? undefined,
+            });
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+
+          // Detect model from server only if user didn't explicitly set one
+          let model = (env["SPECWRIGHT_MODEL"] as string) || "";
+          if (!model) {
+            try {
+              const provRes = await fetch(`${ocUrl}/provider`, { signal: AbortSignal.timeout(5000) });
+              if (provRes.ok) {
+                const provData = await provRes.json() as { default: Record<string, string>; connected: string[] };
+                const pid =
+                  provData.connected.find((p: string) => {
+                    const id = p.toLowerCase();
+                    return (id.includes("openai") || id.includes("chatgpt")) && provData.default[p];
+                  }) ??
+                  provData.connected.find((p: string) => provData.default[p]) ??
+                  provData.connected[0];
+                if (pid && provData.default[pid]) {
+                  model = provData.default[pid];
+                  win.webContents.send("pipeline:log", { line: `[pipeline] Detected model: ${model} (${pid})` });
+                }
+              }
+            } catch {
+              // use default model
+            }
+          }
+          if (!model) model = "gpt-5.5";
+
+          const { AiSdkRunner } = await loadAiSdkRunner();
+          const runner = new AiSdkRunner();
+          activeClaudeRunner = runner;
+
+          // Filter to only command-based MCPs (AiSdkRunner doesn't support HTTP MCPs)
+          const cmdMcps: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
+          for (const [name, cfg] of Object.entries(mcpServers)) {
+            if (cfg.command) cmdMcps[name] = cfg as { command: string; args?: string[]; env?: Record<string, string> };
+          }
+
+          fullText = await runner.run({
+            systemPrompt,
+            userMessage,
+            model,
+            mcpServers: cmdMcps,
+            includePlaywrightMcp: false,
+            projectPath: projectPath ?? undefined,
+            onToken: (token: string) => {
+              win.webContents.send("pipeline:token", { token });
+            },
+            onLog: (line: string) => {
+              sendLog(win, line);
+            },
+            onToolEnd: (toolName: string, durationMs: number) => {
+              win.webContents.send("pipeline:tool-end", { toolName, toolId: "", durationMs });
+            },
+            onStepFinish: () => {},
+          });
+
+          win.webContents.send("pipeline:log", { line: "[pipeline] Done" });
+        } else {
           // ── claude-runner ──
+          win.webContents.send("pipeline:log", { line: `[pipeline] Launching Claude Runner…` });
+
           const { Runner } = await loadClaudeRunner();
 
           const mcpConfig: Record<string, string | { command: string; args?: string[]; env?: Record<string, string> } | { type: "http"; url: string; headers?: Record<string, string> }> = {};
@@ -533,6 +652,12 @@ export function registerPipelineIpc(
         line: `[pipeline] Interrupted by user — Claude will pause and await instructions`,
       });
       activeStream.send("\n\n[User interrupted. Pause what you're doing and wait for instructions.]");
+    } else if (activeClaudeRunner?.interrupt) {
+      const win = getWindow();
+      win?.webContents.send("pipeline:log", {
+        line: `[pipeline] Interrupted by user — model will pause and await instructions`,
+      });
+      activeClaudeRunner.interrupt();
     }
   });
 
@@ -562,6 +687,7 @@ export function registerPipelineIpc(
     }
     return false;
   });
+  ipcMain.handle("pipeline:clear-logs", () => clearLocalLogs());
 
   // Read context files (plan + seed) for continuation prompts
   ipcMain.handle("pipeline:read-context-files", async () => {

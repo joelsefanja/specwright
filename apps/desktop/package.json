@@ -23,6 +23,7 @@
     "@assistant-ui/react": "^0.12.24",
     "@assistant-ui/react-markdown": "^0.12.8",
     "@playwright/mcp": "^0.0.75",
+    "@specwright/agent-runner": "workspace:*",
     "@specwright/plugin": "workspace:*",
     "claude-runner": "^0.5.1",
     "electron-store": "^10.1.0",

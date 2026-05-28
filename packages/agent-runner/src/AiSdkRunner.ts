@@ -20,6 +20,18 @@ const dynamicImport = new Function("specifier", "return import(specifier)") as (
 
 // Type-only import for the Vercel AI SDK — erased at compile time, no ESM issue.
 import type { LanguageModel } from "ai";
+import {
+  getProvider,
+  buildConfig,
+  resolveProvider,
+  generateDirect,
+  opencodeHealth,
+  opencodeDetectModel,
+  opencodeCleanupSession,
+  opencodeInterruptSession,
+  type EnvVars,
+  type ProviderSetup,
+} from "./providers/registry";
 
 export interface AiSdkRunOptions {
   /** System prompt for the pipeline */
@@ -44,6 +56,8 @@ export interface AiSdkRunOptions {
   onToolEnd?: (toolName: string, durationMs: number) => void;
   /** Called when a step (LLM turn) finishes, with token usage */
   onStepFinish?: (info: { stepNumber: number; totalTokens: number; toolCalls: string[] }) => void;
+  /** Project root directory (for opencode session context) */
+  projectPath?: string;
 }
 
 /** MCP client handle for cleanup */
@@ -69,6 +83,7 @@ export class AiSdkRunner {
       onLog,
       onToolEnd,
       onStepFinish,
+      projectPath,
     } = options;
 
     this.aborted = false;
@@ -76,67 +91,90 @@ export class AiSdkRunner {
 
     onLog?.("[ai-sdk] Loading Vercel AI SDK…");
 
-    // Dynamic imports for ESM packages
-    const [aiMod, anthropicMod, mcpMod, mcpSdkMod] = await Promise.all([
+    /* ---- Dynamic imports (ESM → CJS bridge) ---- */
+    const [aiMod, mcpMod, mcpSdkMod] = await Promise.all([
       dynamicImport("ai") as Promise<typeof import("ai") & { stepCountIs: (n: number) => unknown }>,
-      dynamicImport("@ai-sdk/anthropic") as Promise<typeof import("@ai-sdk/anthropic")>,
       dynamicImport("@ai-sdk/mcp") as Promise<typeof import("@ai-sdk/mcp")>,
       dynamicImport("@modelcontextprotocol/sdk/client/stdio.js") as Promise<{
-        StdioClientTransport: new (opts: { command: string; args: string[] }) => unknown;
+        StdioClientTransport: new (opts: {
+          command: string;
+          args?: string[];
+          stderr?: string;
+        }) => { stderr: unknown; start: () => Promise<void>; close: () => Promise<void>; send: (m: unknown) => Promise<void> };
       }>,
     ]);
 
     const { streamText, stepCountIs } = aiMod;
-    const { anthropic } = anthropicMod;
     const { createMCPClient } = mcpMod;
     const { StdioClientTransport } = mcpSdkMod;
 
-    // Provider factory: allow switching LLM backend via env
-    const provider = (process.env.SPECWRIGHT_LLM_PROVIDER ?? "anthropic").toLowerCase();
-    const baseURL = process.env.SPECWRIGHT_LLM_BASE_URL;
-    const modelName = process.env.SPECWRIGHT_MODEL ?? model;
+    /* ---- Resolve provider via registry (Strategy pattern) ---- */
+    const providerName = (process.env.SPECWRIGHT_LLM_PROVIDER ?? "anthropic").toLowerCase();
+    const defaultModel = model;
+    const env: EnvVars = process.env as unknown as EnvVars;
+    const config = buildConfig(env, defaultModel, projectPath);
 
-    let aiModel: LanguageModel;
-    const providerOptions: Record<string, any> = {};
-
-    if (provider === "openai" || provider === "ollama") {
-      let openaiMod: any = null;
-      try {
-        openaiMod = await dynamicImport("@ai-sdk/openai");
-      } catch {
-        // some installs may not include the provider package; fall back to ai runtime
+    // Special case: opencode needs a running server — detect model early
+    if (providerName === "opencode") {
+      const ocUrl = config.opencodeUrl || "http://127.0.0.1:18789";
+      const healthy = await opencodeHealth(ocUrl);
+      if (!healthy) {
+        onLog?.("[ai-sdk] OpenCode server not reachable at " + ocUrl);
+        onLog?.("[ai-sdk] Start it manually: opencode serve --port 18789");
+        throw new Error(
+          `OpenCode server not running at ${ocUrl}. Start with: opencode serve --port 18789`
+        );
       }
 
-      const openaiFactory = (openaiMod && (openaiMod.openai ?? openaiMod.default)) || (aiMod as any).openai;
-
-      const opts: any = {};
-      if (baseURL) opts.baseURL = baseURL;
-      if (process.env.SPECWRIGHT_LLM_API_KEY) opts.apiKey = process.env.SPECWRIGHT_LLM_API_KEY;
-      if (provider === "ollama") {
-        opts.baseURL = opts.baseURL ?? "http://localhost:11434/v1";
-        opts.apiKey = opts.apiKey ?? "ollama";
-      }
-
-      if (openaiFactory) {
-        try {
-          aiModel = openaiFactory(modelName, opts);
-        } catch {
-          aiModel = openaiFactory(modelName);
+      if (!config.modelName) {
+        const detected = await opencodeDetectModel(ocUrl);
+        if (detected) {
+          config.modelName = detected.modelId;
+          onLog?.(`[ai-sdk] Detected opencode model: ${config.modelName} (provider: ${detected.providerId})`);
         }
-      } else {
-        aiModel = anthropic(modelName);
       }
-
-      providerOptions.openai = { baseURL: opts.baseURL, apiKey: opts.apiKey };
-    } else {
-      aiModel = anthropic(modelName);
-      providerOptions.anthropic = { cacheControl: { type: "ephemeral" } };
     }
 
+    const setup: ProviderSetup = await resolveProvider(providerName, config);
+    onLog?.(`[ai-sdk] Provider: ${providerName}, model: ${config.modelName}`);
+
+    /* ---- OpenCode direct path (no AI SDK tool loop) ---- */
+    if (!setup.supportsTools) {
+      const self = this;
+      const abortHandle = { get aborted() { return self.aborted; } };
+
+      try {
+        onLog?.("[ai-sdk] Running model inference…");
+        const result = await generateDirect(
+          setup.provider,
+          setup.config,
+          systemPrompt,
+          userMessage,
+          abortHandle as { aborted: boolean }
+        );
+
+        // Emit tokens for UI (send full text as a single chunk — opencode is blocking)
+        onToken(result.text);
+
+        onLog?.(
+          `[ai-sdk] Pipeline complete — ${result.inputTokens + result.outputTokens} total tokens`
+        );
+        return result.text;
+      } catch (err) {
+        if (this.aborted) {
+          onLog?.("[ai-sdk] Aborted by user");
+          return "";
+        }
+        throw err;
+      } finally {
+        await this.cleanup();
+      }
+    }
+
+    /* ---- AI SDK path (anthropic / openai / ollama) ---- */
     // Collect all tools from MCP servers
     let allTools: Record<string, unknown> = {};
 
-    // Connect to Playwright MCP (auto-discovers browser tools)
     if (includePlaywrightMcp) {
       onLog?.("[ai-sdk] Connecting to Playwright MCP…");
       try {
@@ -155,15 +193,24 @@ export class AiSdkRunner {
       }
     }
 
-    // Connect to additional MCP servers (from .mcp.json)
-    for (const [name, config] of Object.entries(mcpServers)) {
+    for (const [name, cfg] of Object.entries(mcpServers)) {
       onLog?.(`[ai-sdk] Connecting to MCP server: ${name}…`);
       try {
+        const transport = new StdioClientTransport({
+          command: cfg.command,
+          args: cfg.args ?? [],
+          stderr: "pipe",
+        });
+        // Consume stderr silently — MCP SDK default is "inherit" which
+        // leaks child process stderr directly to the parent console.
+        // Piping + draining prevents both the leak and backpressure.
+        const stderrStream = transport.stderr;
+        if (stderrStream && typeof (stderrStream as any).on === "function") {
+          (stderrStream as any).on("data", () => {});
+          (stderrStream as any).on("error", () => {});
+        }
         const client = await createMCPClient({
-          transport: new StdioClientTransport({
-            command: config.command,
-            args: config.args ?? [],
-          }) as unknown as Parameters<typeof createMCPClient>[0]["transport"],
+          transport: transport as unknown as Parameters<typeof createMCPClient>[0]["transport"],
         }) as McpClientHandle;
         this.mcpClients.push(client);
         const tools = await client.tools();
@@ -175,16 +222,16 @@ export class AiSdkRunner {
     }
 
     onLog?.(`[ai-sdk] Total tools available: ${Object.keys(allTools).length}`);
-    onLog?.(`[ai-sdk] Starting pipeline with ${modelName}…`);
+    onLog?.(`[ai-sdk] Starting pipeline with ${config.modelName}…`);
 
     try {
       const result = streamText({
-        model: aiModel,
+        model: setup.model!,
         system: systemPrompt,
         messages: [{ role: "user" as const, content: userMessage }],
         tools: allTools as Parameters<typeof streamText>[0]["tools"],
         stopWhen: stepCountIs(maxSteps) as Parameters<typeof streamText>[0]["stopWhen"],
-        providerOptions: providerOptions,
+        providerOptions: setup.providerOptions as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onStepFinish: async (event: any) => {
           const toolCalls = (event.toolCalls as Array<{ toolName: string }>) ?? [];
@@ -206,7 +253,8 @@ export class AiSdkRunner {
         },
       });
 
-      // Stream tokens to UI
+      onLog?.("[ai-sdk] Running model inference…");
+
       let fullText = "";
       for await (const chunk of result.textStream) {
         if (this.aborted) break;
@@ -214,7 +262,6 @@ export class AiSdkRunner {
         onToken(chunk);
       }
 
-      // Wait for all steps to complete
       const finalResult = await result;
       const usage = await finalResult.usage;
       onLog?.(
@@ -239,7 +286,14 @@ export class AiSdkRunner {
     this.cleanup().catch(() => {});
   }
 
-  /** Disconnect all MCP clients */
+  /** Interrupt the running model — sends a pause message to the current session */
+  interrupt(): void {
+    opencodeInterruptSession(
+      "\n\n[User interrupted. Pause what you're doing and wait for instructions.]"
+    ).catch(() => {});
+  }
+
+  /** Disconnect all MCP clients and clean up any OpenCode session */
   private async cleanup(): Promise<void> {
     for (const client of this.mcpClients) {
       try {
@@ -249,5 +303,6 @@ export class AiSdkRunner {
       }
     }
     this.mcpClients = [];
+    await opencodeCleanupSession();
   }
 }
