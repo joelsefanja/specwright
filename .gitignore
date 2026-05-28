@@ -10,6 +10,7 @@ Thumbs.db
 .env.local
 apps/desktop/out/
 apps/desktop/dist/
+apps/web/public/pagefind/
 
 # E2E framework artifacts
 .features-gen/
