@@ -44,30 +44,28 @@ export function AuthSettingsModal({
   const canSave = isOAuth ? isOAuthConfigured(fields) : isEmailPasswordConfigured(fields);
 
   const inputCls = (required: boolean, val: string) =>
-    `w-full bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border focus:outline-none focus:border-brand-500 placeholder-slate-600 ${
-      required && !val ? "border-red-500/60" : "border-slate-600"
-    }`;
+    `operator-field w-full px-2 py-2 ${required && !val ? "border-[var(--sw-danger)]" : ""}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-[360px] max-h-[90vh] overflow-y-auto"
+        className="operator-panel operator-modal-sm border shadow-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
-          <h2 className="text-slate-200 text-sm font-semibold">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-operator-line">
+          <h2 className="text-stone-200 text-sm font-semibold">
             {isOAuth ? "OAuth" : "Email + Password"} Settings
           </h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-sm">✕</button>
+          <button onClick={onClose} className="operator-muted hover:text-stone-300 text-xs">Close</button>
         </div>
 
         <div className="px-4 py-3 space-y-4">
           <div className="space-y-2">
-            <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">User Identity</p>
+            <p className="operator-section-title">User Identity</p>
 
             <div>
-              <label className="block text-slate-400 text-xs mb-1">
-                Email <span className="text-red-400">*</span>
+              <label className="operator-control-label">
+                Email <span className="operator-danger">*</span>
               </label>
               <input
                 type="text"
@@ -81,8 +79,8 @@ export function AuthSettingsModal({
             {isOAuth && (
               <>
                 <div>
-                  <label className="block text-slate-400 text-xs mb-1">
-                    Display Name <span className="text-slate-600">(optional)</span>
+                  <label className="operator-control-label">
+                    Display Name <span className="operator-muted">(optional)</span>
                   </label>
                   <input
                     type="text"
@@ -94,8 +92,8 @@ export function AuthSettingsModal({
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 text-xs mb-1">
-                    Picture URL <span className="text-slate-600">(optional)</span>
+                  <label className="operator-control-label">
+                    Picture URL <span className="operator-muted">(optional)</span>
                   </label>
                   <input
                     type="text"
@@ -110,8 +108,8 @@ export function AuthSettingsModal({
 
             {!isOAuth && (
               <div>
-                <label className="block text-slate-400 text-xs mb-1">
-                  Password <span className="text-red-400">*</span>
+                <label className="operator-control-label">
+                  Password <span className="operator-danger">*</span>
                 </label>
                 <input
                   type="password"
@@ -126,14 +124,14 @@ export function AuthSettingsModal({
 
           {isOAuth && (
             <div className="space-y-2">
-              <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">
-                Auth Mechanism <span className="text-slate-600 normal-case">(one required)</span>
+              <p className="operator-section-title">
+                Auth Mechanism <span className="operator-muted normal-case tracking-normal">(one required)</span>
               </p>
 
               <div>
-                <label className="block text-slate-400 text-xs mb-1">
+                <label className="operator-control-label">
                   Storage Key
-                  {!fields.buttonTestId && <span className="text-red-400"> *</span>}
+                  {!fields.buttonTestId && <span className="operator-danger"> *</span>}
                 </label>
                 <input
                   type="text"
@@ -142,19 +140,19 @@ export function AuthSettingsModal({
                   placeholder="localStorage key (e.g. app-auth-user)"
                   className={inputCls(!fields.buttonTestId, fields.storageKey)}
                 />
-                <p className="text-slate-600 text-xs mt-0.5">Inject auth directly — no popup needed</p>
+                <p className="operator-muted text-xs mt-1">Inject auth directly — no popup needed</p>
               </div>
 
               <div className="flex items-center gap-2">
-                <hr className="flex-1 border-slate-700" />
-                <span className="text-slate-600 text-xs">or</span>
-                <hr className="flex-1 border-slate-700" />
+                <hr className="flex-1 border-operator-line" />
+                <span className="operator-muted text-xs">or</span>
+                <hr className="flex-1 border-operator-line" />
               </div>
 
               <div>
-                <label className="block text-slate-400 text-xs mb-1">
+                <label className="operator-control-label">
                   Sign-in Button Test ID
-                  {!fields.storageKey && <span className="text-red-400"> *</span>}
+                  {!fields.storageKey && <span className="operator-danger"> *</span>}
                 </label>
                 <input
                   type="text"
@@ -166,8 +164,8 @@ export function AuthSettingsModal({
               </div>
 
               <div>
-                <label className="block text-slate-400 text-xs mb-1">
-                  Sign-in Path <span className="text-slate-600">(optional)</span>
+                <label className="operator-control-label">
+                  Sign-in Path <span className="operator-muted">(optional)</span>
                 </label>
                 <input
                   type="text"
@@ -179,8 +177,8 @@ export function AuthSettingsModal({
               </div>
 
               <div>
-                <label className="block text-slate-400 text-xs mb-1">
-                  Post-login URL <span className="text-slate-600">(optional)</span>
+                <label className="operator-control-label">
+                  Post-login URL <span className="operator-muted">(optional)</span>
                 </label>
                 <input
                   type="text"
@@ -194,7 +192,7 @@ export function AuthSettingsModal({
           )}
 
           {!canSave && (
-            <p className="text-red-400/80 text-xs">
+            <p className="operator-danger text-xs">
               {isOAuth
                 ? "Email and at least one auth mechanism (Storage Key or Button Test ID) are required."
                 : "Email and password are required."}
@@ -202,17 +200,17 @@ export function AuthSettingsModal({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-700">
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-operator-line">
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 text-xs px-3 py-1.5 rounded transition-colors"
+            className="operator-button"
           >
             Cancel
           </button>
           <button
             onClick={() => canSave && onSave(fields)}
             disabled={!canSave}
-            className="text-xs px-4 py-1.5 rounded font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-brand-600 hover:bg-brand-500 text-white"
+            className="operator-button-primary disabled:opacity-40"
           >
             Save Settings
           </button>

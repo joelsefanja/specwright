@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import { exec, execFileSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import type { ConfigService } from "../services/ConfigService";
 import type { ProjectService, EnvVars, InstructionCard, PluginSource } from "../services/ProjectService";
 import { log as fileLog } from "../logger";
@@ -11,18 +11,11 @@ export function registerProjectIpc(
   projectService: ProjectService,
   getWindow: () => BrowserWindow | null
 ): void {
-  const quotePosix = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
-  const quoteWin = (value: string): string => `"${value.replace(/"/g, '\\"')}"`;
-
   const runGlab = (args: string[], cwd: string): Promise<string> => {
     return new Promise((resolve, reject) => {
-      const command = process.platform === "win32"
-        ? `glab ${args.map(quoteWin).join(" ")}`
-        : `${fs.existsSync("/bin/zsh") ? "/bin/zsh" : fs.existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh"} -l -c ${quotePosix(`glab ${args.map(quotePosix).join(" ")}`)}`;
-
       fileLog(`[gitlab] cwd=${cwd}`);
       fileLog(`[gitlab] glab ${args.join(" ")}`);
-      exec(command, { cwd, windowsHide: true }, (error, stdout, stderr) => {
+      execFile("glab", args, { cwd, windowsHide: true }, (error, stdout, stderr) => {
         if (error) {
           const notFound = (error as NodeJS.ErrnoException).code === "ENOENT" || error.message.includes("not recognized");
           const message = notFound ? "glab was not found on PATH. Install GitLab CLI or add it to PATH." : (stderr || error.message || "glab command failed");
@@ -40,9 +33,10 @@ export function registerProjectIpc(
   const parseRepoFromGitRemote = (remote: string): string | null => {
     const trimmed = remote.trim().replace(/\.git$/, "");
     const ssh = trimmed.match(/git@[^:]+:(.+)$/);
-    if (ssh) return ssh[1];
+    if (ssh && trimmed.includes("gitlab")) return ssh[1];
     try {
       const url = new URL(trimmed);
+      if (!url.hostname.includes("gitlab")) return null;
       return url.pathname.replace(/^\//, "");
     } catch {
       return null;
@@ -80,6 +74,22 @@ export function registerProjectIpc(
       return data.username ?? null;
     } catch {
       return null;
+    }
+  };
+
+  const getGitLabStatus = async (cwd: string): Promise<{ hasGlab: boolean; authenticated: boolean; repo?: string; username?: string | null; error?: string }> => {
+    try {
+      await runGlab(["--version"], cwd);
+    } catch (error) {
+      return { hasGlab: false, authenticated: false, error: error instanceof Error ? error.message : String(error) };
+    }
+
+    const repo = getRepoFromGit(cwd) ?? undefined;
+    try {
+      await runGlab(["auth", "status"], cwd);
+      return { hasGlab: true, authenticated: true, repo, username: await getGitLabUsername(cwd) };
+    } catch (error) {
+      return { hasGlab: true, authenticated: false, repo, error: error instanceof Error ? error.message : String(error) };
     }
   };
 
@@ -234,7 +244,7 @@ export function registerProjectIpc(
     };
   });
 
-  ipcMain.handle("project:list-gitlab-items", async (_event, projectPath: string) => {
+  ipcMain.handle("project:list-gitlab-items", async (_event, projectPath: string, mode: "assigned" | "project" = "assigned") => {
     const repo = await getGitLabRepoPath(projectPath);
     const username = await getGitLabUsername(projectPath);
     const errors: string[] = [];
@@ -250,7 +260,8 @@ export function registerProjectIpc(
     }> = [];
 
     try {
-      const rawIssues = await runGlab(["api", `projects/${encodeURIComponent(repo)}/issues?scope=all&per_page=50&order_by=updated_at&sort=desc`], projectPath);
+      const assignee = mode === "assigned" && username ? `&assignee_username=${encodeURIComponent(username)}` : "";
+      const rawIssues = await runGlab(["api", `projects/${encodeURIComponent(repo)}/issues?state=opened&scope=all${assignee}&per_page=50&order_by=updated_at&sort=desc`], projectPath);
       const issues = JSON.parse(rawIssues) as Array<{
         iid: number | string;
         title?: string;
@@ -277,7 +288,21 @@ export function registerProjectIpc(
       errors.push(`issues: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    return { repo, username, items: items.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")), errors };
+    return {
+      repo,
+      username,
+      items: items.sort((a, b) => {
+        if (mode === "project" && Boolean(a.assignedToMe) !== Boolean(b.assignedToMe)) {
+          return a.assignedToMe ? -1 : 1;
+        }
+        return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+      }),
+      errors,
+    };
+  });
+
+  ipcMain.handle("project:gitlab-status", async (_event, projectPath: string) => {
+    return getGitLabStatus(projectPath);
   });
 
   ipcMain.handle("project:detect-plugin", (_event, p: string) => {
@@ -323,6 +348,15 @@ export function registerProjectIpc(
 
   ipcMain.handle("project:get-path", () => {
     return configService.getProjectPath();
+  });
+
+  ipcMain.handle("project:read-gitlab-source", (_event, projectPath: string, relativePath: string) => {
+    const fullPath = path.resolve(projectPath, relativePath);
+    const projectRoot = path.resolve(projectPath);
+    if (!fullPath.startsWith(projectRoot)) throw new Error("File path is outside project");
+    const markdown = fs.readFileSync(fullPath, "utf-8");
+    const images = Array.from(markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((match) => match[1]).filter(Boolean);
+    return { markdown, images };
   });
 
   ipcMain.handle("project:set-path", (_event, p: string) => {

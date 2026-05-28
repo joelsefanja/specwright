@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Play, Plus } from "@phosphor-icons/react";
 import { useConfigStore } from "@renderer/store/config.store";
 import { useInstructionStore } from "@renderer/store/instruction.store";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
@@ -118,13 +119,12 @@ export default function InstructionsBuilder(): React.JSX.Element {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Instruction cards — scrollable */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-4 py-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3 bg-operator-canvas">
         {cards.length === 0 && (
           <div className="flex flex-col items-center justify-center h-48 text-center">
-            <p className="text-slate-600 text-sm mb-3">No instructions yet.</p>
-            <p className="text-slate-700 text-xs max-w-xs">
-              Click "+ Add Instruction" to define what pages and workflows to test, or insert a
-              template from the right panel.
+            <p className="operator-label mb-3">No Instructions</p>
+            <p className="text-stone-600 text-xs max-w-xs leading-relaxed">
+              Define a module, source, and expected workflow before starting generation. Templates remain available in the inspection rail.
             </p>
           </div>
         )}
@@ -135,39 +135,39 @@ export default function InstructionsBuilder(): React.JSX.Element {
 
       {/* Validation error banner */}
       {saveError && (
-        <div className="flex-shrink-0 px-4 py-2 bg-red-950/50 border-t border-red-800/50">
+        <div className="flex-shrink-0 px-4 py-2 border-t" style={{ background: "rgba(217,120,104,0.1)", borderColor: "rgba(217,120,104,0.45)" }}>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-red-400 text-xs flex items-center gap-1.5">
-              <span>⚠</span> {saveError}
+            <p className="operator-danger text-xs flex items-center gap-1">
+              <span className="operator-label operator-danger">Error</span> {saveError}
             </p>
             <button
               onClick={() => setSaveError(null)}
-              className="text-red-600 hover:text-red-400 text-xs flex-shrink-0"
+              className="operator-danger text-xs flex-shrink-0 opacity-70 hover:opacity-100"
             >
-              ✕
+              Close
             </button>
           </div>
         </div>
       )}
 
       {/* Toolbar */}
-      <div className="flex-shrink-0 border-t border-slate-700 px-4 py-3 flex items-center justify-between gap-3 bg-slate-900">
+      <div className="operator-toolbar flex items-center justify-between gap-3">
         <button
           onClick={addCard}
-          className="flex items-center gap-1.5 text-slate-300 hover:text-white text-sm border border-slate-600 hover:border-slate-500 rounded-lg px-3 py-1.5 transition-colors"
+          className="operator-button gap-2"
         >
-          <span className="text-base leading-none">+</span>
-          Add Instruction
+          <Plus className="operator-icon" weight="bold" />
+          Instruction
         </button>
 
         <div className="flex items-center gap-2">
           {authNeedsEmail && (
-            <span className="text-amber-400 text-xs">Email required for OAuth</span>
+            <span className="text-amber-400 text-xs">OAuth email required</span>
           )}
           <button
             onClick={clearAll}
             disabled={isRunning || cards.length === 0}
-            className="flex items-center gap-1.5 text-slate-400 hover:text-red-400 text-sm border border-slate-600 hover:border-red-800 disabled:opacity-40 rounded-lg px-3 py-1.5 transition-colors"
+            className="operator-button hover:border-[var(--sw-danger)] hover:text-[var(--sw-danger)]"
           >
             Discard
           </button>
@@ -175,17 +175,16 @@ export default function InstructionsBuilder(): React.JSX.Element {
             onClick={handleGenerate}
             disabled={isRunning || !projectPath || !canGenerate}
             title={jiraNeedsAuth ? "Connect Atlassian to use Jira URL" : undefined}
-            className="flex items-center gap-2 bg-brand-500 hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg px-4 py-1.5 transition-colors"
+            className="operator-button-primary gap-2"
           >
             {isRunning ? (
               <>
-                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Running…
+                <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent animate-spin" />
+                Running
               </>
             ) : (
               <>
-                <span>▶</span>
-                Generate
+                <Play className="operator-icon" weight="fill" /> Generate
               </>
             )}
           </button>

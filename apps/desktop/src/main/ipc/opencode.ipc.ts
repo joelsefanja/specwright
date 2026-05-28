@@ -25,6 +25,15 @@ async function fetchJson<T>(url: string, timeout = 5000): Promise<T | null> {
   }
 }
 
+async function waitForHealthy(baseUrl: string, attempts = 12): Promise<boolean> {
+  for (let i = 0; i < attempts; i += 1) {
+    const data = await fetchJson<{ healthy: boolean }>(`${baseUrl}/global/health`, 500);
+    if (data?.healthy === true) return true;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
+}
+
 export function registerOpencodeIpc(): void {
   ipcMain.handle(
     "opencode:health",
@@ -80,8 +89,10 @@ export function registerOpencodeIpc(): void {
       _event,
       port: number
     ): Promise<{ ok: boolean; error?: string }> => {
+      const baseUrl = `http://127.0.0.1:${port}`;
       if (serverProcess) {
-        return { ok: true };
+        const healthy = await waitForHealthy(baseUrl, 3);
+        return healthy ? { ok: true } : { ok: false, error: "OpenCode server is running but not healthy" };
       }
       try {
         serverProcess = spawn("opencode", ["serve", "--port", String(port)], {
@@ -92,11 +103,11 @@ export function registerOpencodeIpc(): void {
         serverProcess.on("exit", () => {
           serverProcess = null;
         });
-        serverProcess.on("error", (err) => {
+        serverProcess.on("error", () => {
           serverProcess = null;
         });
-        // wait a bit for server to start
-        await new Promise((r) => setTimeout(r, 2000));
+        const healthy = await waitForHealthy(baseUrl);
+        if (!healthy) return { ok: false, error: "OpenCode server did not become healthy" };
         return { ok: true };
       } catch (err) {
         return { ok: false, error: String(err) };

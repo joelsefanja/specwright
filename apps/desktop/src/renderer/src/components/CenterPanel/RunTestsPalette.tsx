@@ -6,11 +6,11 @@ type PaletteItem =
   | { kind: "script";  label: string; arg: string }
   | { kind: "custom";  label: string; arg: string };
 
-const kindMeta: Record<PaletteItem["kind"], { icon: string; badge: string; badgeCls: string; rowHover: string }> = {
-  module:   { icon: "▶", badge: "Module",   badgeCls: "text-brand-400 bg-brand-950/60 border-brand-800/40",   rowHover: "hover:bg-slate-800/80" },
-  workflow: { icon: "⇄", badge: "Workflow",  badgeCls: "text-emerald-400 bg-emerald-950/60 border-emerald-800/40", rowHover: "hover:bg-slate-800/80" },
-  script:   { icon: "≡", badge: "Script",    badgeCls: "text-slate-400 bg-slate-800 border-slate-700",         rowHover: "hover:bg-slate-800/80" },
-  custom:   { icon: "↵", badge: "Custom",    badgeCls: "text-amber-400 bg-amber-950/40 border-amber-800/30",   rowHover: "hover:bg-slate-800/80" },
+const kindMeta: Record<PaletteItem["kind"], { code: string; badge: string; badgeCls: string; rowHover: string }> = {
+  module:   { code: "MD", badge: "Module",   badgeCls: "text-brand-400 bg-brand-950/60 border-brand-800/40", rowHover: "hover:bg-operator-field" },
+  workflow: { code: "WF", badge: "Workflow", badgeCls: "text-brand-300 bg-brand-950/40 border-brand-800/40", rowHover: "hover:bg-operator-field" },
+  script:   { code: "SH", badge: "Script",   badgeCls: "text-stone-400 bg-operator-field border-operator-line", rowHover: "hover:bg-operator-field" },
+  custom:   { code: "CU", badge: "Custom",   badgeCls: "text-amber-400 bg-amber-950/40 border-amber-800/30", rowHover: "hover:bg-operator-field" },
 };
 
 export function RunTestsPalette({
@@ -87,9 +87,9 @@ export function RunTestsPalette({
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] pointer-events-none">
-        <div className="pointer-events-auto w-[480px] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-slate-700">
-            <span className="text-slate-500 text-sm">⌕</span>
+        <div className="operator-panel operator-command pointer-events-auto border shadow-2xl flex flex-col overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-operator-line">
+            <span className="operator-label">Run</span>
             <input
               ref={inputRef}
               type="text"
@@ -97,18 +97,18 @@ export function RunTestsPalette({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKey}
               placeholder="Search modules, workflows, scripts…"
-              className="flex-1 bg-transparent text-slate-200 text-sm placeholder-slate-600 outline-none"
+              className="flex-1 bg-transparent text-stone-200 text-[13.5px] placeholder-stone-600 outline-none"
               autoFocus
             />
             {query && (
-              <button onClick={() => setQuery("")} className="text-slate-600 hover:text-slate-400 text-xs">✕</button>
+              <button onClick={() => setQuery("")} className="operator-muted hover:text-stone-400 text-xs">Clear</button>
             )}
-            <kbd className="text-slate-700 text-[10px] font-mono border border-slate-700 rounded px-1 py-0.5">esc</kbd>
+            <kbd className="operator-muted text-[10px] font-mono border border-operator-line px-1 py-0.5">esc</kbd>
           </div>
 
           <div ref={listRef} className="max-h-72 overflow-y-auto scrollable py-1">
             {items.length === 0 ? (
-              <p className="px-4 py-6 text-slate-600 text-xs text-center">No matches — type a tag like @auth or a script name</p>
+              <p className="px-4 py-6 operator-muted text-xs text-center">No matches — type a tag like @auth or a script name</p>
             ) : (
               items.map((item, idx) => {
                 const meta = kindMeta[item.kind];
@@ -119,19 +119,19 @@ export function RunTestsPalette({
                     data-idx={idx}
                     onClick={() => onRun(item.arg)}
                     onMouseEnter={() => setActiveIdx(idx)}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${meta.rowHover} ${isActive ? "bg-slate-800" : ""}`}
+                    className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${meta.rowHover} ${isActive ? "bg-operator-field" : ""}`}
                   >
-                    <span className={`text-xs flex-shrink-0 ${item.kind === "module" ? "text-brand-400" : item.kind === "workflow" ? "text-emerald-400" : item.kind === "custom" ? "text-amber-400" : "text-slate-500"}`}>
-                      {meta.icon}
+                    <span className={`operator-label flex-shrink-0 ${item.kind === "module" ? "text-brand-400" : item.kind === "workflow" ? "text-brand-300" : item.kind === "custom" ? "text-amber-400" : "text-stone-500"}`}>
+                      {meta.code}
                     </span>
-                    <span className={`flex-1 text-xs font-medium truncate ${isActive ? "text-white" : "text-slate-300"}`}>
+                    <span className={`flex-1 text-[13px] font-medium truncate ${isActive ? "text-stone-50" : "text-stone-300"}`}>
                       {item.label}
                     </span>
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${meta.badgeCls}`}>
+                    <span className={`operator-badge ${meta.badgeCls}`}>
                       {meta.badge}
                     </span>
                     {isActive && (
-                      <kbd className="text-slate-600 text-[10px] font-mono">↵</kbd>
+                      <kbd className="operator-muted text-[10px] font-mono">enter</kbd>
                     )}
                   </button>
                 );
@@ -139,7 +139,7 @@ export function RunTestsPalette({
             )}
           </div>
 
-          <div className="px-4 py-2 border-t border-slate-800 flex items-center gap-3 text-slate-700 text-[10px]">
+          <div className="px-4 py-2 border-t border-operator-line flex items-center gap-3 operator-muted text-[10px]">
             <span><kbd className="font-mono">↑↓</kbd> navigate</span>
             <span><kbd className="font-mono">↵</kbd> run</span>
             <span><kbd className="font-mono">esc</kbd> close</span>

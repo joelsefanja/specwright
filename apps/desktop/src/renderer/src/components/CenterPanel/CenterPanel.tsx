@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { ChartBar, Play } from "@phosphor-icons/react";
 import WelcomeScreen from "./WelcomeScreen";
 import InstructionsBuilder from "./InstructionsBuilder";
 import HealerPanel from "./HealerPanel";
@@ -151,7 +152,7 @@ export default function CenterPanel(): React.JSX.Element {
   if (!loaded) {
     return (
       <div className="flex items-center justify-center h-full">
-        <span className="w-5 h-5 border-2 border-brand-400 border-t-transparent rounded-full animate-spin" />
+        <span className="w-5 h-5 border-2 border-brand-400 border-t-transparent animate-spin" />
       </div>
     );
   }
@@ -167,25 +168,25 @@ export default function CenterPanel(): React.JSX.Element {
     <div className="relative" ref={reportMenuRef}>
       <button
         onClick={() => setShowReportMenu((v) => !v)}
-        className="text-slate-400 hover:text-slate-200 text-xs border border-slate-700 hover:border-slate-500 rounded px-2.5 py-1 transition-colors flex items-center gap-1.5"
+        className="operator-button gap-1 py-1"
       >
-        <span>📊</span> Reports <span className="opacity-60">▾</span>
+        <ChartBar className="operator-icon" weight="bold" /> Reports <span className="opacity-60">▾</span>
       </button>
       {showReportMenu && (
-        <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded shadow-xl z-50 min-w-[170px] py-1">
+        <div className="operator-menu absolute right-0 top-full mt-1 z-50 min-w-[170px] py-1">
           <button
             disabled={!reportAvailability.playwright}
             onClick={() => { setShowReportMenu(false); window.specwright.report.openPlaywright(projectPath!); }}
-            className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            className="operator-menu-item"
           >
-            <span>🎭</span> Playwright Report
+            Playwright Report
           </button>
           <button
             disabled={!reportAvailability.bdd}
             onClick={() => { setShowReportMenu(false); window.specwright.report.openBdd(projectPath!); }}
-            className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            className="operator-menu-item"
           >
-            <span>🥒</span> BDD Report
+            BDD Report
           </button>
         </div>
       )}
@@ -196,36 +197,30 @@ export default function CenterPanel(): React.JSX.Element {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Tab bar — shown when pipeline is NOT running */}
       {!showOutput && (
-        <div className="flex-shrink-0 border-b border-slate-700 bg-slate-900/60 px-4 flex items-center justify-between">
-          <div className="flex gap-0">
+        <div className="operator-toolbar-top flex items-center justify-between">
+          <div className="operator-tabs">
             <button
               onClick={() => setActiveTab("explorer")}
-              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-                activeTab === "explorer"
-                  ? "border-brand-500 text-brand-400"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
-              }`}
+              className="operator-tab"
+              data-active={activeTab === "explorer"}
             >
               Explorer
             </button>
             <button
               onClick={() => setActiveTab("healer")}
-              className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-                activeTab === "healer"
-                  ? "border-emerald-500 text-emerald-400"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
-              }`}
+              className="operator-tab"
+              data-active={activeTab === "healer"}
             >
               Healer
             </button>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="operator-toolbar-actions">
             {hasTests && (
               <button
                 onClick={openRunPicker}
-                className="text-emerald-400 hover:text-emerald-300 text-xs border border-emerald-800 hover:border-emerald-600 rounded px-2.5 py-1 transition-colors flex items-center gap-1.5"
+                className="operator-button operator-toolbar-action-primary text-[var(--sw-accent-strong)] hover:text-[var(--sw-accent-strong)]"
               >
-                <span>▶</span> Run Tests
+                <Play className="operator-icon" weight="fill" /> Run Tests
               </button>
             )}
             {hasReports && reportDropdown}
@@ -235,7 +230,7 @@ export default function CenterPanel(): React.JSX.Element {
 
       {/* Reports bar — shown after run completes */}
       {showOutput && status === "done" && hasReports && (
-        <div className="flex-shrink-0 border-b border-slate-700 bg-slate-900/60 px-4 py-1.5 flex items-center justify-end">
+        <div className="operator-toolbar-compact flex items-center justify-end">
           {reportDropdown}
         </div>
       )}

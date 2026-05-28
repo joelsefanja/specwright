@@ -64,6 +64,12 @@ interface ReportAPI {
   openBdd: (projectPath: string) => Promise<void>;
 }
 
+interface WindowControlsAPI {
+  minimize: () => Promise<void>;
+  toggleFullscreen: () => Promise<boolean>;
+  close: () => Promise<void>;
+}
+
 interface OpenCodeProviderData {
   all?: Array<{ id: string; models?: Record<string, unknown> }>;
   default: Record<string, string>;
@@ -87,7 +93,9 @@ interface SpecwrightAPI {
     pickFiles: () => Promise<string[]>;
     uploadTestFile: (sourcePath: string) => Promise<string>;
     fetchGitLabIssue: (folderPath: string, issueRef: string) => Promise<{ filePath: string; title: string; updatedAt: string; changed: boolean }>;
-    listGitLabItems: (folderPath: string) => Promise<{ repo: string; username?: string | null; items: GitLabItem[]; errors: string[] }>;
+    listGitLabItems: (folderPath: string, mode?: "assigned" | "project") => Promise<{ repo: string; username?: string | null; items: GitLabItem[]; errors: string[] }>;
+    gitLabStatus: (folderPath: string) => Promise<{ hasGlab: boolean; authenticated: boolean; repo?: string; username?: string | null; error?: string }>;
+    readGitLabSource: (folderPath: string, relativePath: string) => Promise<{ markdown: string; images: string[] }>;
     bootstrap: (folderPath: string, options?: { skipAuth?: boolean; authStrategy?: string; overlay?: PluginSource }) => Promise<BootstrapResult>;
     validatePlugin: (dirPath: string) => Promise<PluginValidationResult>;
     detectPlugin: (folderPath: string) => Promise<PluginInfo>;
@@ -133,6 +141,7 @@ interface SpecwrightAPI {
     clearLogs: () => Promise<number>;
   };
   shell: ShellAPI;
+  window: WindowControlsAPI;
   network: NetworkAPI;
   report: ReportAPI;
   opencode: {

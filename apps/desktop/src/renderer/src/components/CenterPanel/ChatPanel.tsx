@@ -11,17 +11,17 @@ function MessageBubble({ msg }: { msg: ChatMessage }): React.JSX.Element {
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
       {/* Avatar for assistant */}
       {!isUser && (
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center text-white text-xs font-bold mr-2 mt-0.5">
-          ◈
+        <div className="operator-label text-brand-400 mr-2 mt-1">
+          SW
         </div>
       )}
 
       <div className={`max-w-[80%] ${isUser ? "order-1" : ""}`}>
         <div
-          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+          className={`border px-4 py-2 text-[13.5px] leading-relaxed ${
             isUser
-              ? "bg-brand-600 text-white rounded-tr-sm"
-              : "bg-slate-700 text-slate-100 rounded-tl-sm"
+              ? "bg-brand-950/40 text-brand-100 border-brand-800"
+              : "bg-operator-field text-stone-100 border-operator-line"
           }`}
         >
           {msg.content ? (
@@ -31,9 +31,9 @@ function MessageBubble({ msg }: { msg: ChatMessage }): React.JSX.Element {
           ) : (
             /* Streaming placeholder — three pulsing dots */
             <span className="flex gap-1 items-center h-4">
-              <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:300ms]" />
+              <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:300ms]" />
             </span>
           )}
 
@@ -46,7 +46,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }): React.JSX.Element {
 
       {/* Avatar for user */}
       {isUser && (
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-slate-600 flex items-center justify-center text-slate-200 text-xs font-bold ml-2 mt-0.5">
+        <div className="operator-label text-stone-400 ml-2 mt-1">
           U
         </div>
       )}
@@ -106,7 +106,7 @@ function ChatInput(): React.JSX.Element {
   };
 
   return (
-    <div className="border-t border-slate-700 bg-slate-800/80 px-4 py-3">
+    <div className="operator-toolbar">
       {!canRun && (
         <p className="text-amber-400 text-xs mb-2">
           Add an API key or log in with Claude Code to start chatting.
@@ -127,28 +127,28 @@ function ChatInput(): React.JSX.Element {
                 : "Message Specwright… (Enter to send, Shift+Enter for newline)"
           }
           rows={1}
-          className="flex-1 min-w-0 bg-slate-700 text-slate-100 text-sm rounded-xl px-3 py-2 border border-slate-600 focus:outline-none focus:border-brand-500 resize-none placeholder-slate-500 disabled:opacity-40 scrollable"
+          className="operator-field flex-1 min-w-0 px-3 py-2 resize-none placeholder-stone-500 disabled:opacity-40 scrollable"
           style={{ maxHeight: "160px", overflowY: "auto" }}
         />
 
         {isRunning ? (
           <button
             onClick={handleAbort}
-            className="flex-shrink-0 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded-xl px-4 py-2 transition-colors"
+            className="operator-button flex-shrink-0 operator-danger hover:border-[var(--sw-danger)] px-4 py-2"
           >
-            ■ Stop
+            Stop
           </button>
         ) : (
           <button
             onClick={handleSend}
             disabled={!input.trim() || !canRun}
-            className="flex-shrink-0 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm font-medium rounded-xl px-4 py-2 transition-colors"
+            className="operator-button-primary flex-shrink-0 px-4 py-2 disabled:opacity-40"
           >
-            ▶ Send
+            Send
           </button>
         )}
       </div>
-      <p className="text-slate-600 text-xs mt-1.5">
+      <p className="operator-muted text-xs mt-1.5">
         {hasClaudeCode ? "Using Claude Code CLI" : "Using API key"} · Shift+Enter for new line
       </p>
     </div>
@@ -168,12 +168,12 @@ export default function ChatPanel(): React.JSX.Element {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top bar */}
-      <div className="flex items-center justify-end px-4 py-2 border-b border-slate-700 bg-slate-900/40 flex-shrink-0">
+      <div className="operator-toolbar-compact flex items-center justify-end">
         {messages.length > 0 && (
           <button
             onClick={clearFeed}
             disabled={status === "running"}
-            className="text-slate-500 hover:text-slate-300 disabled:opacity-30 text-xs transition-colors"
+            className="operator-muted hover:text-stone-300 disabled:opacity-30 text-xs transition-colors"
           >
             Clear chat
           </button>

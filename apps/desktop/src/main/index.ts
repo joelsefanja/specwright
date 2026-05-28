@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage, shell, Menu, MenuItem } from "electron";
+import { app, BrowserWindow, nativeImage, shell, Menu, MenuItem, ipcMain } from "electron";
 import { join } from "path";
 import { autoUpdater } from "electron-updater";
 import { ConfigService } from "./services/ConfigService";
@@ -30,6 +30,16 @@ let mainWindow: BrowserWindow | null = null;
 const configService = new ConfigService();
 const projectService = new ProjectService();
 
+function registerWindowIpc(): void {
+  ipcMain.handle("window:minimize", () => mainWindow?.minimize());
+  ipcMain.handle("window:toggle-fullscreen", () => {
+    if (!mainWindow) return false;
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    return mainWindow.isFullScreen();
+  });
+  ipcMain.handle("window:close", () => mainWindow?.close());
+}
+
 function createWindow(): BrowserWindow {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -38,7 +48,10 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     title: "Specwright",
     icon: join(__dirname, "../../build/icon.png"),
-    backgroundColor: "#0f172a",
+    backgroundColor: "#11100e",
+    autoHideMenuBar: process.platform !== "darwin",
+    fullscreen: true,
+    show: false,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
@@ -49,12 +62,26 @@ function createWindow(): BrowserWindow {
     trafficLightPosition: { x: 16, y: 16 },
   });
 
+  if (process.platform !== "darwin") {
+    mainWindow.setMenuBarVisibility(false);
+  }
+
   if (process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }
+
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type === "keyDown" && input.key === "F11") {
+      event.preventDefault();
+      mainWindow?.setFullScreen(!mainWindow.isFullScreen());
+    }
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -198,6 +225,7 @@ app.whenReady().then(async () => {
   registerAtlassianIpc();
   registerNetworkIpc();
   registerReportIpc();
+  registerWindowIpc();
   registerOpencodeIpc();
 
   // Open a URL in the system default browser

@@ -1,15 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { ArrowsClockwise } from "@phosphor-icons/react";
 import { useConfigStore } from "@renderer/store/config.store";
 import { useInstructionStore, type InstructionCard as ICard } from "@renderer/store/instruction.store";
-
-const RefreshIcon = (): React.JSX.Element => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-    <path d="M21 3v5h-5"/>
-    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-    <path d="M8 16H3v5"/>
-  </svg>
-);
 
 interface TemplateEntry {
   templateName: string;
@@ -32,7 +24,7 @@ interface TemplateEntry {
 function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
   return [
     {
-      templateName: "🔍 Quick Explore",
+      templateName: "Quick Explore",
       moduleName: "HomePage",
       category: "@Modules",
       subModules: [],
@@ -48,7 +40,7 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       autoApprove: false,
     },
     {
-      templateName: "🧭 Page Navigation",
+      templateName: "Page Navigation",
       moduleName: "Navigation",
       category: "@Modules",
       subModules: [],
@@ -69,7 +61,7 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       autoApprove: false,
     },
     {
-      templateName: "📝 Form & CRUD",
+      templateName: "Form & CRUD",
       moduleName: "FormTest",
       category: "@Modules",
       subModules: [],
@@ -92,7 +84,7 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       autoApprove: false,
     },
     {
-      templateName: "🔐 Auth Flow",
+      templateName: "Auth Flow",
       moduleName: "Authentication",
       category: "@Modules",
       subModules: [],
@@ -224,49 +216,49 @@ export default function TemplatePanel(): React.JSX.Element {
     return (
       <div
         key={key}
-        className="bg-slate-800 border border-slate-700 rounded-lg p-3 space-y-2"
+        className="operator-card operator-stack-sm"
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-brand-400 text-xs">
-              {tmpl.category === "@Workflows" ? "🔄" : "📋"}
+            <span className="operator-label text-brand-400">
+              {tmpl.category === "@Workflows" ? "WF" : "MOD"}
             </span>
-            <span className="text-slate-200 text-xs font-medium truncate">
+            <span className="text-stone-200 text-xs font-medium truncate">
               {tmpl.templateName}
             </span>
           </div>
           {onDelete && (
             <button
               onClick={onDelete}
-              className="text-slate-600 hover:text-red-400 text-xs flex-shrink-0 transition-colors"
+              className="text-stone-600 hover:text-[var(--sw-danger)] text-xs flex-shrink-0 transition-colors"
               title="Delete template"
             >
-              ✕
+              Delete
             </button>
           )}
         </div>
 
-        <p className="text-slate-500 text-xs truncate">
+        <p className="text-stone-500 text-xs truncate">
           {tmpl.moduleName}
           {tmpl.steps.length > 0 ? ` · ${tmpl.steps.length} step${tmpl.steps.length > 1 ? "s" : ""}` : ""}
           {urlPath ? ` · ${urlPath}` : ""}
         </p>
         {tmpl.jiraURL && (
-          <span className="inline-flex items-center gap-1 bg-blue-900/40 text-blue-300 text-[10px] rounded px-1.5 py-0.5 border border-blue-800 w-fit">
-            <span>🔗</span> Jira
+          <span className="operator-badge">
+            Jira
           </span>
         )}
 
         <button
           onClick={() => handleInsert(tmpl)}
           disabled={!isReady}
-          className={`w-full text-center text-xs border rounded px-2 py-1 transition-colors ${
+          className={`w-full text-center text-xs border px-2 py-2 transition-colors ${
             insertedId === tmpl.templateName
-              ? "text-green-400 border-green-700 bg-green-900/20"
-              : "text-brand-400 hover:text-brand-300 disabled:text-slate-600 border-slate-700 hover:border-brand-700 disabled:border-slate-800"
+              ? "text-brand-300 border-brand-700 bg-brand-950/20"
+              : "text-brand-400 hover:text-brand-300 disabled:text-stone-600 border-operator-line hover:border-brand-700 disabled:border-stone-800"
           }`}
         >
-          {insertedId === tmpl.templateName ? "Inserted ✓" : "Insert →"}
+          {insertedId === tmpl.templateName ? "Inserted" : "Insert"}
         </button>
       </div>
     );
@@ -274,24 +266,24 @@ export default function TemplatePanel(): React.JSX.Element {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-3 py-2 border-b border-slate-700 flex-shrink-0 flex items-center justify-between">
-        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">
+      <div className="operator-toolbar-top flex items-center justify-between">
+        <p className="operator-tab border-[var(--sw-accent)] text-operator-ink px-0">
           Templates
         </p>
         {isReady && (
           <button
             onClick={() => setRefreshKey(k => k + 1)}
-            className="text-blue-400 hover:text-blue-300 transition-colors"
+            className="operator-icon-button"
             title="Reload templates from disk"
           >
-            <RefreshIcon />
+            <ArrowsClockwise className="operator-icon" weight="bold" />
           </button>
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-3 py-2 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3">
         {!isReady && (
-          <p className="text-slate-600 text-xs text-center py-4">
+          <p className="operator-muted text-xs text-center py-4">
             Select a project to load templates.
           </p>
         )}
@@ -299,8 +291,8 @@ export default function TemplatePanel(): React.JSX.Element {
         {/* Project-specific templates from instructions.example.js — shown first */}
         {isReady && exampleTemplates.length > 0 && (
           <div className="space-y-2">
-            <p className="text-slate-500 text-xs flex items-center gap-1.5">
-              <span>📋</span> Project Templates
+            <p className="operator-label flex items-center gap-1">
+              Project Templates
             </p>
             {exampleTemplates.map((tmpl, i) =>
               renderTemplateCard(tmpl, `example-${i}`)
@@ -311,12 +303,12 @@ export default function TemplatePanel(): React.JSX.Element {
         {/* Custom user templates */}
         {isReady && (
           <div className="space-y-2">
-            <p className="text-slate-500 text-xs flex items-center gap-1.5">
-              <span>⭐</span> Custom Templates
+            <p className="operator-label flex items-center gap-1">
+              Custom Templates
             </p>
 
             {customTemplates.length === 0 && !showSaveInput && (
-              <p className="text-slate-600 text-xs py-2 text-center">
+              <p className="operator-muted text-xs py-2 text-center">
                 No custom templates yet.
               </p>
             )}
@@ -326,7 +318,7 @@ export default function TemplatePanel(): React.JSX.Element {
             )}
 
             {showSaveInput ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <input
                   type="text"
                   value={savingName}
@@ -337,19 +329,19 @@ export default function TemplatePanel(): React.JSX.Element {
                   }}
                   placeholder="Template name…"
                   autoFocus
-                  className="w-full bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500 placeholder-slate-600"
+                  className="operator-field w-full px-2 py-2"
                 />
-                <div className="flex gap-1.5">
+                <div className="flex gap-2">
                   <button
                     onClick={handleSaveAsTemplate}
                     disabled={!savingName.trim()}
-                    className="flex-1 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 text-white text-xs rounded px-2 py-1 transition-colors"
+                    className="operator-button-primary flex-1 px-2 py-2"
                   >
                     Save
                   </button>
                   <button
                     onClick={() => { setShowSaveInput(false); setSavingName(""); }}
-                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded px-2 py-1 transition-colors"
+                    className="operator-button flex-1 px-2 py-2"
                   >
                     Cancel
                   </button>
@@ -358,7 +350,7 @@ export default function TemplatePanel(): React.JSX.Element {
             ) : (
               <button
                 onClick={() => setShowSaveInput(true)}
-                className="w-full text-slate-400 hover:text-brand-400 text-xs border border-dashed border-slate-700 hover:border-brand-700 rounded px-2 py-1.5 transition-colors"
+                className="operator-button w-full border-dashed"
               >
                 + Save current as template
               </button>
@@ -369,8 +361,8 @@ export default function TemplatePanel(): React.JSX.Element {
         {/* Built-in quick-start templates — fallback when no project templates exist */}
         {isReady && (
           <div className="space-y-2">
-            <p className="text-slate-500 text-xs flex items-center gap-1.5">
-              <span>🚀</span> Quick Start
+            <p className="operator-label flex items-center gap-1">
+              Quick Start
             </p>
             {builtInTemplates.map((tmpl, i) =>
               renderTemplateCard(tmpl, `builtin-${i}`)

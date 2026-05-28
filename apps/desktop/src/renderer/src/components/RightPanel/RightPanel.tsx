@@ -6,7 +6,7 @@ export default function RightPanel(): React.JSX.Element {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Templates: top half */}
-      <div className="flex-1 min-h-0 border-b border-slate-700">
+      <div className="flex-1 min-h-0 border-b border-operator-line">
         <TemplatePanel />
       </div>
       {/* Terminal: bottom half */}

@@ -92,29 +92,29 @@ export function OpenCodeConfigModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl w-[360px] max-h-[90vh] overflow-y-auto"
+        className="operator-panel operator-modal-sm border shadow-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
-          <h2 className="text-slate-200 text-sm font-semibold">OpenCode Model</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-sm">✕</button>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-operator-line">
+          <h2 className="text-stone-200 text-sm font-semibold">OpenCode Model</h2>
+          <button onClick={onClose} className="operator-muted hover:text-stone-300 text-xs">Close</button>
         </div>
 
         <div className="px-4 py-3 space-y-4">
           <div>
-            <label className="block text-slate-400 text-xs mb-1">Server URL</label>
+            <label className="operator-control-label">Server URL</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="http://127.0.0.1:18789"
-                className="flex-1 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500 placeholder-slate-600"
+                className="operator-field flex-1 px-2 py-2"
               />
               <button
                 onClick={handleDetect}
                 disabled={status === "detecting"}
-                className="px-3 py-1.5 text-xs bg-slate-700 text-slate-200 border border-slate-600 hover:border-brand-500 rounded transition-colors disabled:opacity-50"
+                className="operator-button disabled:opacity-50"
               >
                 {status === "detecting" ? "..." : "Detect"}
               </button>
@@ -122,19 +122,19 @@ export function OpenCodeConfigModal({
           </div>
 
           {status === "error" && message && (
-            <p className="text-red-400 text-xs">{message}</p>
+            <p className="operator-danger text-xs">{message}</p>
           )}
 
           {models.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">Models</p>
+            <div className="space-y-2">
+              <p className="operator-section-title">Models</p>
               {models.map((m) => (
                 <label
                   key={m.providerId}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                  className={`flex items-center gap-3 px-3 py-2 border cursor-pointer transition-colors ${
                     selectedModel === m.modelId
-                      ? "bg-slate-700 border-brand-500"
-                      : "bg-slate-750 border-slate-700 hover:border-slate-500"
+                      ? "bg-brand-950/30 border-brand-500"
+                      : "bg-operator-field border-operator-line hover:border-stone-500"
                   }`}
                 >
                   <input
@@ -142,11 +142,11 @@ export function OpenCodeConfigModal({
                     name="oc-model"
                     checked={selectedModel === m.modelId}
                     onChange={() => setSelectedModel(m.modelId)}
-                    className="w-3.5 h-3.5 text-brand-500 bg-slate-700 border-slate-600"
+                    className="w-3.5 h-3.5 text-brand-500 bg-operator-field border-operator-line"
                   />
                   <div className="min-w-0">
-                    <p className="text-slate-200 text-xs font-medium">{label(m.providerId)}</p>
-                    <p className="text-slate-500 text-xxs font-mono truncate">{m.modelId}</p>
+                    <p className="text-stone-200 text-[13px] font-medium">{label(m.providerId)}</p>
+                    <p className="operator-muted text-xs font-mono truncate">{m.modelId}</p>
                   </div>
                 </label>
               ))}
@@ -154,18 +154,18 @@ export function OpenCodeConfigModal({
           )}
 
           {status === "connected" && selectedModel && (
-            <p className="text-green-400/80 text-xs flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-green-400 rounded-full" />
+            <p className="text-[var(--sw-success)] text-xs flex items-center gap-1">
+              <span className="operator-status-dot bg-[var(--sw-success)]" />
               Connected — {selectedModel} / {variant}
             </p>
           )}
 
           <div>
-            <label className="block text-slate-400 text-xs mb-1">Variant</label>
+            <label className="operator-control-label">Variant</label>
             <select
               value={variant}
               onChange={(e) => setVariant(e.target.value)}
-              className="w-full bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-brand-500"
+              className="operator-select w-full"
             >
               <option value="minimal">minimal</option>
               <option value="low">low</option>
@@ -176,17 +176,17 @@ export function OpenCodeConfigModal({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-700">
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-operator-line">
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 text-xs px-3 py-1.5 rounded transition-colors"
+            className="operator-button"
           >
             Cancel
           </button>
           <button
             onClick={() => onSave(url, selectedModel, variant)}
             disabled={!selectedModel}
-            className="text-xs px-4 py-1.5 rounded font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-brand-600 hover:bg-brand-500 text-white"
+            className="operator-button-primary disabled:opacity-40"
           >
             Save
           </button>

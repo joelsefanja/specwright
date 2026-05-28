@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useReducer } from "react";
+import { ArrowLeft, Copy, Pause, Play, Prohibit, PaperPlaneTilt } from "@phosphor-icons/react";
 import PermissionPrompt from "./PermissionPrompt";
 import { PhaseHeader } from "./PhaseHeader";
 import { usePipelineStore, type ChatMessage } from "@renderer/store/pipeline.store";
@@ -211,40 +212,40 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700 bg-slate-900/40 flex-shrink-0">
-        <div className="flex items-center gap-2">
+      <div className="operator-toolbar-compact flex items-center justify-between">
+        <div className="operator-toolbar-actions">
           {isRunning && !activeTool && (
             <>
-              <span className="w-2 h-2 bg-brand-400 rounded-full animate-pulse" />
-              <span className="text-brand-400 text-xs">Agent running…</span>
+              <span className="w-2 h-2 bg-brand-400 animate-pulse" />
+              <span className="operator-label text-brand-400">Engine Running</span>
             </>
           )}
           {isRunning && activeTool && (
             <>
-              <span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+              <span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent animate-spin" />
               <span className="text-yellow-300 text-xs font-mono">{activeTool}</span>
-              <span className="text-slate-500 text-xs">running…</span>
+              <span className="text-stone-500 text-xs">running</span>
             </>
           )}
-          {status === "done" && <span className="text-green-400 text-xs">✓ Complete</span>}
-          {status === "error" && <span className="text-red-400 text-xs">✕ {errorMessage ?? "Error"}</span>}
+          {status === "done" && <span className="operator-label text-[var(--sw-success)]">Complete</span>}
+          {status === "error" && <span className="operator-danger text-xs">Error: {errorMessage ?? "Unknown failure"}</span>}
         </div>
         <div className="flex items-center gap-2">
           {isRunning && (
             <>
               <button
                 onClick={() => window.specwright.pipeline.interrupt()}
-                className="text-amber-400 hover:text-amber-300 text-xs border border-amber-800 hover:border-amber-600 rounded px-2 py-0.5 transition-colors"
+                className="operator-button py-1 text-[var(--sw-warning)] hover:border-[var(--sw-warning)] hover:text-[var(--sw-warning)]"
                 title="Pause Claude — stops current turn, you can type new instructions"
               >
-                ⏸ Interrupt
+                <Pause className="operator-icon" weight="bold" /> Interrupt
               </button>
               <button
                 onClick={() => window.specwright.pipeline.abort()}
-                className="text-red-400 hover:text-red-300 text-xs border border-red-800 hover:border-red-600 rounded px-2 py-0.5 transition-colors"
+                className="operator-button py-1 operator-danger hover:border-[var(--sw-danger)]"
                 title="Kill the session completely"
               >
-                ■ Abort
+                <Prohibit className="operator-icon" weight="bold" /> Abort
               </button>
             </>
           )}
@@ -252,15 +253,15 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             <>
               <button
                 onClick={onOpenRunPicker}
-                className="text-emerald-400 hover:text-emerald-300 text-xs border border-emerald-800 hover:border-emerald-600 rounded px-2 py-0.5 transition-colors"
+                className="operator-button operator-toolbar-action-primary py-1 text-[var(--sw-accent-strong)] hover:border-[var(--sw-accent)] hover:text-[var(--sw-accent-strong)]"
               >
-                ▶ Run Tests
+                <Play className="operator-icon" weight="fill" /> Run Tests
               </button>
               <button
                 onClick={clearFeed}
-                className="text-slate-400 hover:text-white text-xs border border-slate-700 hover:border-slate-500 rounded px-2 py-0.5 transition-colors"
+                className="operator-button py-1"
               >
-                ← Back
+                <ArrowLeft className="operator-icon" weight="bold" /> Back
               </button>
             </>
           )}
@@ -268,10 +269,10 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
       </div>
 
       {/* Message thread */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-4 py-4 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3 bg-operator-canvas">
         {isRunning && messages.length === 0 && (
-          <div className="flex items-center gap-3 text-slate-500 text-sm">
-            <span className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+          <div className="flex items-center gap-3 text-stone-500 text-sm">
+            <span className="w-4 h-4 border-2 border-brand-500 border-t-transparent animate-spin" />
             Establishing session… (may take 15–20s with a large system prompt)
           </div>
         )}
@@ -284,7 +285,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             if (msg.role === "user") {
               return (
                 <div key={msg.id} className="flex justify-end">
-                  <div className="bg-brand-900/40 border border-brand-700/50 rounded-xl px-4 py-2.5 max-w-[85%]">
+                  <div className="border border-[color-mix(in_srgb,var(--sw-accent)_36%,transparent)] bg-[var(--sw-accent-soft)] px-4 py-2 max-w-[85%]">
                     <p className="text-brand-200 text-sm whitespace-pre-wrap select-text cursor-text">{msg.content}</p>
                   </div>
                 </div>
@@ -294,7 +295,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             return (
               <div key={msg.id} className="group/msg relative">
                 {msg.content ? (
-                  <pre className="whitespace-pre-wrap break-words font-sans text-slate-200 text-sm leading-relaxed m-0 select-text cursor-text">
+                  <pre className="whitespace-pre-wrap break-words font-sans text-stone-200 text-[13.5px] leading-relaxed m-0 select-text cursor-text">
                     {renderWithLinks(displayedText.current.get(msg.id) ?? msg.content)}
                     {msg.isStreaming && !activeTool && (
                       <span className="inline-block w-0.5 h-4 bg-brand-400 ml-0.5 align-middle animate-pulse" />
@@ -302,24 +303,24 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
                   </pre>
                 ) : msg.isStreaming ? (
                   <span className="flex gap-1 items-center h-5">
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                    <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:0ms]" />
+                    <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:150ms]" />
+                    <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:300ms]" />
                   </span>
                 ) : null}
                 {msg.isStreaming && activeTool && (
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/30">
-                    <span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-stone-800/80">
+                    <span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent animate-spin" />
                     <span className="text-yellow-300 text-xs font-mono">{activeTool}</span>
-                    <span className="text-slate-500 text-xs">running…</span>
+                    <span className="text-stone-500 text-xs">running</span>
                   </div>
                 )}
                 {msg.content && (
                   <button
                     onClick={() => handleCopy(msg.id, msg.content)}
-                    className="absolute top-0 right-0 opacity-0 group-hover/msg:opacity-100 text-slate-500 hover:text-white text-xs border border-slate-700 hover:border-slate-500 rounded px-1.5 py-0.5 bg-slate-900 transition-all"
+                    className="absolute top-0 right-0 opacity-0 group-hover/msg:opacity-100 operator-muted hover:text-operator-ink text-xs border border-operator-line hover:border-operator-line-strong px-2 py-1 bg-operator-canvas transition-all"
                   >
-                    {copied === msg.id ? "✓" : "Copy"}
+                    {copied === msg.id ? "Copied" : <><Copy className="operator-icon" weight="bold" /> Copy</>}
                   </button>
                 )}
               </div>
@@ -330,13 +331,13 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             return (
               <div
                 key={`phase-group-${group.phaseId}-${groupIdx}`}
-                className={`rounded-xl border overflow-hidden ${
-                  isActivePhase ? "border-brand-700/50" : "border-slate-700/60"
+                className={`border overflow-hidden ${
+                  isActivePhase ? "border-brand-700/70" : "border-stone-800"
                 }`}
               >
                 <PhaseHeader phase={phase} isActive={isActivePhase} />
                 {group.messages.some((m) => m.content || m.isStreaming) && (
-                  <div className="px-5 py-4 space-y-3 bg-slate-800/40">
+                  <div className="px-5 py-4 space-y-3 bg-operator-panel/70">
                     {messageBubbles}
                   </div>
                 )}
@@ -356,7 +357,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
       </div>
 
       {/* Input bar */}
-      <div className="flex-shrink-0 border-t border-slate-700 px-4 py-3 bg-slate-900/60">
+      <div className="operator-toolbar bg-operator-panel">
         <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
@@ -365,17 +366,17 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             onKeyDown={handleKeyDown}
             placeholder="Send a message to guide the agent… (Enter to send, Shift+Enter for newline)"
             rows={2}
-            className="flex-1 resize-none bg-slate-800 border border-slate-600 focus:border-brand-500 rounded-lg px-3 py-2 text-slate-200 text-sm placeholder-slate-600 outline-none transition-colors"
+            className="operator-field flex-1 resize-none px-3 py-2 text-[13.5px] placeholder-stone-600"
           />
           <button
             onClick={handleSend}
             disabled={!inputText.trim()}
-            className="flex-shrink-0 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-lg px-3 py-2 transition-colors h-[60px]"
+            className="operator-button-primary self-stretch flex-shrink-0"
           >
-            Send
+            <PaperPlaneTilt className="operator-icon" weight="fill" /> Send
           </button>
         </div>
-        <p className="text-slate-700 text-xs mt-1">
+        <p className="text-stone-700 text-xs mt-1">
           The agent will receive your message and can respond or adjust its approach.
         </p>
       </div>

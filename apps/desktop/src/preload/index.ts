@@ -18,13 +18,17 @@ contextBridge.exposeInMainWorld("specwright", {
       ipcRenderer.invoke("project:fetch-gitlab-issue", folderPath, issueRef) as Promise<{
         filePath: string; title: string; updatedAt: string; changed: boolean;
       }>,
-    listGitLabItems: (folderPath: string) =>
-      ipcRenderer.invoke("project:list-gitlab-items", folderPath) as Promise<{
+    listGitLabItems: (folderPath: string, mode?: "assigned" | "project") =>
+      ipcRenderer.invoke("project:list-gitlab-items", folderPath, mode) as Promise<{
         repo: string;
         username?: string | null;
         items: Array<{ kind: "issue" | "work_item"; iid: string; title: string; state?: string; updatedAt?: string; webUrl?: string; ref: string; assignedToMe?: boolean }>;
         errors: string[];
       }>,
+    gitLabStatus: (folderPath: string) =>
+      ipcRenderer.invoke("project:gitlab-status", folderPath) as Promise<{ hasGlab: boolean; authenticated: boolean; repo?: string; username?: string | null; error?: string }>,
+    readGitLabSource: (folderPath: string, relativePath: string) =>
+      ipcRenderer.invoke("project:read-gitlab-source", folderPath, relativePath) as Promise<{ markdown: string; images: string[] }>,
     bootstrap: (folderPath: string, options?: { skipAuth?: boolean; authStrategy?: string; overlay?: { type: "local"; dirPath: string } | { type: "npm"; packageName: string; registry?: string } }) =>
       ipcRenderer.invoke("project:bootstrap", folderPath, options),
     validatePlugin: (dirPath: string) =>
@@ -136,6 +140,12 @@ contextBridge.exposeInMainWorld("specwright", {
 
   shell: {
     openUrl: (url: string) => ipcRenderer.invoke("shell:open-url", url) as Promise<void>,
+  },
+
+  window: {
+    minimize: () => ipcRenderer.invoke("window:minimize") as Promise<void>,
+    toggleFullscreen: () => ipcRenderer.invoke("window:toggle-fullscreen") as Promise<boolean>,
+    close: () => ipcRenderer.invoke("window:close") as Promise<void>,
   },
 
   app: {

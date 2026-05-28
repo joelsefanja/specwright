@@ -75,146 +75,172 @@ export default function WelcomeScreen(): React.JSX.Element {
   if (selectedFolder) {
     const folderLabel = selectedFolder.split("/").slice(-2).join("/");
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-6 px-8 py-8 overflow-y-auto">
-        <div className="text-center">
-          <div className="mb-3 flex justify-center"><SpecwrightLogo size={52} /></div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Bootstrap setup</h2>
-          <p className="text-slate-400 mt-2 text-sm">
-            Project: <span className="text-slate-200 font-mono text-xs bg-slate-800 px-2 py-1 rounded">…/{folderLabel}</span>
-          </p>
-        </div>
-
-        <div className="w-full max-w-lg">
-          <label className="block text-slate-300 text-sm font-medium mb-2">
-            Authentication strategy
-          </label>
-          <p className="text-slate-500 text-xs mb-3">
-            How does your app authenticate users? This controls which auth module the plugin installs.
-          </p>
-          <div className="space-y-2">
-            {AUTH_STRATEGIES.map(({ value, title, desc }) => (
-              <label
-                key={value}
-                className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                  authStrategy === value
-                    ? "bg-brand-500/10 border-brand-500/50"
-                    : "bg-slate-800/50 border-slate-700 hover:border-slate-600"
-                } ${isBootstrapping ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="auth-strategy"
-                  value={value}
-                  checked={authStrategy === value}
-                  onChange={() => setAuthStrategy(value)}
-                  disabled={isBootstrapping}
-                  className="mt-1 accent-brand-500"
-                />
-                <div className="flex-1">
-                  <div className="text-slate-200 text-sm font-medium">{title}</div>
-                  <div className="text-slate-500 text-xs mt-0.5">{desc}</div>
-                </div>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            onClick={handleBack}
-            disabled={isBootstrapping}
-            className="text-slate-400 hover:text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium px-4 py-2.5 transition-all text-sm"
-          >
-            ← Change folder
-          </button>
-          <button
-            onClick={handleBootstrap}
-            disabled={isBootstrapping}
-            className="flex items-center gap-3 bg-brand-500 hover:bg-brand-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-xl px-6 py-2.5 transition-all shadow-lg hover:shadow-brand-500/20 text-sm"
-          >
-            {isBootstrapping ? (
-              <>
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Bootstrapping…
-              </>
-            ) : (
-              <>Bootstrap project →</>
-            )}
-          </button>
-        </div>
-
-        {(isBootstrapping || hasError) && bootstrapLog.length > 0 && (
-          <div className="w-full max-w-lg">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-slate-500 font-mono">Bootstrap log</span>
-              <button
-                onClick={() => navigator.clipboard.writeText(bootstrapLog.join("\n"))}
-                className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-0.5 rounded hover:bg-slate-800"
-                title="Copy log to clipboard"
-              >
-                Copy logs
-              </button>
+      <div className="flex h-full items-center justify-center overflow-y-auto px-8 py-8">
+        <div className="grid w-full max-w-5xl grid-cols-[1fr_1.15fr] gap-8">
+          <div className="operator-card operator-stack-md">
+            <div>
+              <div className="mb-4"><SpecwrightLogo size={56} /></div>
+              <p className="operator-label operator-text-accent">Setup</p>
+              <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.08em] text-operator-ink">Prepare this project</h2>
+              <p className="operator-text-muted mt-3">
+                Specwright installs a Playwright BDD workspace into your app, then guides you through issue context, browser exploration, generation, test execution, and repair.
+              </p>
             </div>
-            <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 font-mono text-xs text-slate-300 space-y-1 max-h-48 overflow-y-auto">
-              {bootstrapLog.map((line, i) => (
-                <div key={i} className={line.includes("Error") ? "text-red-400" : "text-slate-300"}>
-                  {line}
+            <div className="operator-inline-panel operator-stack-sm">
+              <p className="operator-label">Selected folder</p>
+              <p className="operator-text font-mono truncate" title={selectedFolder}>.../{folderLabel}</p>
+            </div>
+            <div className="operator-stack-sm">
+              {[
+                ["01", "Choose authentication", "Tell Specwright how your app logs in."],
+                ["02", "Bootstrap framework", "Install the plugin, fixtures, examples, and agent instructions."],
+                ["03", "Add work context", "Attach GitLab/Jira/files so generated tests match real tasks."],
+                ["04", "Generate and run", "Explore the app, write BDD tests, run them, then repair failures."],
+              ].map(([code, title, desc]) => (
+                <div key={code} className="grid grid-cols-[40px_1fr] gap-3 border-t border-operator-line pt-3 first:border-t-0 first:pt-0">
+                  <span className="operator-label operator-text-accent">{code}</span>
+                  <div>
+                    <p className="operator-text font-semibold">{title}</p>
+                    <p className="operator-text-subtle">{desc}</p>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
-        )}
 
-        {hasError && (
-          <p className="text-red-400 text-sm">
-            Bootstrap failed. Check the log above and try again.
-          </p>
-        )}
+          <div className="operator-card operator-stack-md">
+            <div>
+              <p className="operator-label">Authentication</p>
+              <h3 className="mt-2 text-xl font-semibold text-operator-ink">How should tests sign in?</h3>
+              <p className="operator-text-muted mt-2">
+                This controls which auth module is installed. You can change details later from the sidebar.
+              </p>
+            </div>
+
+            <div className="operator-stack-sm">
+              {AUTH_STRATEGIES.map(({ value, title, desc }) => (
+                <button
+                  type="button"
+                  key={value}
+                  onClick={() => setAuthStrategy(value)}
+                  disabled={isBootstrapping}
+                  className={`operator-list-item border ${authStrategy === value ? "border-[var(--sw-accent)] bg-[var(--sw-accent-soft)]" : "border-operator-line bg-operator-field"}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className={`mt-1 h-3 w-3 border ${authStrategy === value ? "border-[var(--sw-accent)] bg-[var(--sw-accent)]" : "border-operator-line"}`} />
+                    <div>
+                      <p className="operator-text font-semibold">{title}</p>
+                      <p className="operator-text-subtle mt-1">{desc}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-operator-line pt-4">
+              <button
+                onClick={handleBack}
+                disabled={isBootstrapping}
+                className="operator-button disabled:opacity-50"
+              >
+                Change folder
+              </button>
+              <button
+                onClick={handleBootstrap}
+                disabled={isBootstrapping}
+                className="operator-button-primary px-6 py-2 disabled:opacity-50"
+              >
+                {isBootstrapping ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-current border-t-transparent animate-spin" />
+                    Bootstrapping
+                  </>
+                ) : (
+                  <>Bootstrap project</>
+                )}
+              </button>
+            </div>
+
+            {(isBootstrapping || hasError) && bootstrapLog.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="operator-label font-mono">Bootstrap log</span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(bootstrapLog.join("\n"))}
+                    className="operator-button px-2 py-1"
+                    title="Copy log to clipboard"
+                  >
+                    Copy logs
+                  </button>
+                </div>
+                <div className="operator-list max-h-48 overflow-y-auto p-3 font-mono operator-text-subtle">
+                  {bootstrapLog.map((line, i) => (
+                    <div key={i} className={line.includes("Error") ? "operator-danger" : ""}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {hasError && (
+              <p className="operator-danger">
+                Bootstrap failed. Check the log above and try again.
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
 
   // ── Step 1: landing (pick folder) ────────────────────────────────────────
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-8 px-8">
-      {/* Logo / Title */}
-      <div className="text-center">
-        <div className="mb-4 flex justify-center"><SpecwrightLogo size={64} /></div>
-        <h1 className="text-3xl font-bold text-white tracking-tight">Specwright</h1>
-        <p className="text-slate-400 mt-2 text-sm max-w-sm">
-          Describe what to test. Specwright handles the rest.
-        </p>
-        <p className="text-slate-500 mt-1 text-xs max-w-sm">
-          Zero manual coding. Fully automated from exploration to report.
-        </p>
-      </div>
-
-      {/* Create button — opens folder picker */}
-      <button
-        onClick={handlePickFolder}
-        disabled={isBootstrapping}
-        className="flex items-center gap-3 bg-brand-500 hover:bg-brand-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-xl px-8 py-4 transition-all shadow-lg hover:shadow-brand-500/20 text-base"
-      >
-        <span className="text-xl">+</span>
-        Create new test project
-      </button>
-
-      {/* Feature highlights */}
-      <div className="grid grid-cols-3 gap-4 mt-4 w-full max-w-xl">
-        {[
-          { icon: "🤖", label: "Zero Touch", desc: "Describe in English — AI writes, runs, and heals every test" },
-          { icon: "🔍", label: "Live Exploration", desc: "Browser agent discovers selectors before generating a single line" },
-          { icon: "📊", label: "Reports Everyone Reads", desc: "Scenarios and results in plain English, plus traces and a quality score for every run" },
-        ].map(({ icon, label, desc }) => (
-          <div
-            key={label}
-            className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center"
-          >
-            <div className="text-2xl mb-2">{icon}</div>
-            <p className="text-slate-300 text-xs font-medium">{label}</p>
-            <p className="text-slate-600 text-xs mt-1">{desc}</p>
+    <div className="flex h-full items-center justify-center overflow-y-auto px-8 py-8">
+      <div className="grid w-full max-w-6xl grid-cols-[1.05fr_1fr] gap-8">
+        <div className="operator-card operator-stack-md">
+          <div>
+            <div className="mb-5"><SpecwrightLogo size={72} /></div>
+            <p className="operator-label operator-text-accent">Specwright</p>
+            <h1 className="mt-3 text-4xl font-semibold uppercase tracking-[0.08em] text-operator-ink">AI test automation workspace</h1>
+            <p className="operator-text-muted mt-4 max-w-xl">
+              Turn product work into Playwright BDD tests. Specwright reads your issue context, explores the browser, writes feature files and step definitions, runs tests, and helps repair failures.
+            </p>
           </div>
-        ))}
+          <div className="flex gap-3">
+            <button
+              onClick={handlePickFolder}
+              disabled={isBootstrapping}
+              className="operator-button-primary gap-3 px-8 py-4"
+            >
+              Select project folder
+            </button>
+          </div>
+          <p className="operator-text-subtle">
+            Choose an existing app repo. If it already contains Specwright files, it opens immediately. Otherwise you will bootstrap it first.
+          </p>
+        </div>
+
+        <div className="operator-card operator-stack-md">
+          <div>
+            <p className="operator-label">How the workflow works</p>
+            <h2 className="mt-2 text-2xl font-semibold text-operator-ink">From issue to runnable test</h2>
+          </div>
+          {[
+            ["01", "Connect context", "Load GitLab/Jira issues, files, or manual instructions so the agent knows what to test."],
+            ["02", "Explore the app", "The browser agent validates selectors and records evidence before generation."],
+            ["03", "Generate BDD", "Specwright writes feature files and step definitions into the project structure."],
+            ["04", "Run and repair", "Execute tests, inspect reports, and use the healer when selectors or flows fail."],
+          ].map(([code, title, desc]) => (
+            <div key={code} className="operator-inline-panel grid grid-cols-[44px_1fr] gap-3">
+              <span className="operator-label operator-text-accent">{code}</span>
+              <div>
+                <p className="operator-text font-semibold">{title}</p>
+                <p className="operator-text-subtle mt-1">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
