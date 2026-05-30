@@ -150,11 +150,12 @@ export class AiSdkRunner {
           setup.config,
           systemPrompt,
           userMessage,
-          abortHandle as { aborted: boolean }
+          abortHandle as { aborted: boolean },
+          { onToken, onLog, onToolEnd, onStepFinish }
         );
 
-        // Emit tokens for UI (send full text as a single chunk — opencode is blocking)
-        onToken(result.text);
+        // Blocking direct providers return final text only; streaming providers emit tokens themselves.
+        if (!result.streamed) onToken(result.text);
 
         onLog?.(
           `[ai-sdk] Pipeline complete — ${result.inputTokens + result.outputTokens} total tokens`

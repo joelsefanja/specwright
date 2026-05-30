@@ -40,6 +40,7 @@ export interface EnvVars {
   SPECWRIGHT_LLM_API_KEY?: string;
   SPECWRIGHT_MODEL?: string;
   SPECWRIGHT_OPENCODE_URL?: string;
+  SPECWRIGHT_OPENCODE_PROVIDER_ID?: string;
   SPECWRIGHT_OPENCODE_VARIANT?: string;
 }
 
@@ -49,6 +50,7 @@ export function buildConfig(env: EnvVars, defaultModel: string, projectPath?: st
     baseURL: env.SPECWRIGHT_LLM_BASE_URL,
     apiKey: env.SPECWRIGHT_LLM_API_KEY,
     opencodeUrl: env.SPECWRIGHT_OPENCODE_URL,
+    opencodeProviderId: env.SPECWRIGHT_OPENCODE_PROVIDER_ID,
     opencodeVariant: env.SPECWRIGHT_OPENCODE_VARIANT,
     projectPath,
   };
@@ -108,12 +110,13 @@ export async function generateDirect(
   config: ProviderConfig,
   systemPrompt: string,
   userMessage: string,
-  abortHandle?: AbortHandle
+  abortHandle?: AbortHandle,
+  callbacks?: GenerateCallbacks
 ): Promise<DirectGenerateResult> {
   if (!provider.generate) {
     throw new Error(`Provider "${provider.name}" does not support direct generation`);
   }
-  return provider.generate(config, systemPrompt, userMessage, abortHandle);
+  return provider.generate(config, systemPrompt, userMessage, abortHandle, callbacks);
 }
 
 /** Re-export opencode helpers for UI layer. */

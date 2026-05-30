@@ -13,6 +13,8 @@ export interface ProviderConfig {
   apiKey?: string;
   /** OpenCode server URL (only for opencode provider) */
   opencodeUrl?: string;
+  /** Explicit OpenCode provider ID, e.g. "openai" */
+  opencodeProviderId?: string;
   /** OpenCode model variant (e.g. low, medium, high) */
   opencodeVariant?: string;
   /** Project root directory (for setting opencode session context) */
@@ -26,6 +28,7 @@ export interface DirectGenerateResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  streamed?: boolean;
 }
 
 /**
@@ -72,6 +75,7 @@ export interface LLMProvider {
     config: ProviderConfig,
     systemPrompt: string,
     userMessage: string,
-    abortHandle?: AbortHandle
+    abortHandle?: AbortHandle,
+    callbacks?: GenerateCallbacks
   ): Promise<DirectGenerateResult>;
 }

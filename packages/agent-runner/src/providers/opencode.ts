@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
-import type { LLMProvider, ProviderConfig, DirectGenerateResult, AbortHandle } from "./types";
+import { spawn } from "child_process";
+import type { LLMProvider, ProviderConfig, DirectGenerateResult, AbortHandle, GenerateCallbacks } from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Session lifecycle — reused across pipeline steps                   */
@@ -10,6 +11,7 @@ let _sessionBaseUrl: string | null = null;
 let _sessionProviderId: string | null = null;
 let _sessionModelId: string | null = null;
 let _activeSseController: AbortController | null = null;
+const OPENCODE_REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Ensure a session exists for the given server/project.
@@ -21,6 +23,7 @@ async function ensureSession(
   baseUrl: string,
   providerID: string,
   modelId: string | undefined,
+  variant: string | undefined,
   directory?: string,
 ): Promise<string> {
   if (
@@ -37,7 +40,11 @@ async function ensureSession(
     : "/session";
   const sessionRes = await apiFetch(baseUrl, sessionPath, {
     method: "POST",
-    body: JSON.stringify({ title: "sw-opencode" }),
+    body: JSON.stringify({
+      title: "sw-opencode",
+      agent: "build",
+      model: modelId ? { id: modelId, providerID, variant: variant || "low" } : undefined,
+    }),
   });
   _sessionId = ((await sessionRes.json()) as { id: string }).id;
   _sessionBaseUrl = baseUrl;
@@ -123,7 +130,15 @@ function pickPreferredProvider(data: ProviderEndpointResponse): string | undefin
 }
 
 function createMessageId(): string {
-  return `sw-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeModelId(modelId: string | undefined): string | undefined {
+  if (!modelId) return undefined;
+  const normalized = modelId.trim().toLowerCase().replace(/\s+/g, "-");
+  if (normalized === "gpt-5.5-fast") return "gpt-5.5-fast";
+  if (normalized === "gpt-5.5") return "gpt-5.5";
+  return modelId;
 }
 
 async function apiFetch(
@@ -133,7 +148,7 @@ async function apiFetch(
 ): Promise<Response> {
   const res = await fetch(`${baseUrl}${path}`, {
     headers: { "Content-Type": "application/json", ...(init?.headers as Record<string, string>) },
-    signal: AbortSignal.timeout(180_000),
+    signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
     ...init,
   });
   if (!res.ok) {
@@ -230,6 +245,7 @@ export async function detectModel(baseUrl: string): Promise<{
 
 let _cachedProviderMap: Record<string, string> | null = null;
 let _cachedProviderModels: Record<string, string[]> | null = null;
+let _cachedConnectedProviders: string[] | null = null;
 let _cachedBaseUrl: string | null = null;
 
 async function resolveProviderId(baseUrl: string, modelId?: string): Promise<string> {
@@ -239,6 +255,7 @@ async function resolveProviderId(baseUrl: string, modelId?: string): Promise<str
       if (res.ok) {
         const data = (await res.json()) as ProviderEndpointResponse;
         _cachedProviderMap = data.default;
+        _cachedConnectedProviders = data.connected;
         _cachedProviderModels = Object.fromEntries(
           (data.all ?? []).map((provider) => [provider.id, Object.keys(provider.models ?? {})])
         );
@@ -248,21 +265,28 @@ async function resolveProviderId(baseUrl: string, modelId?: string): Promise<str
   }
   if (!_cachedProviderMap) return "";
 
-  // If a specific model was requested, find the provider that has it as default
+  const connected = _cachedConnectedProviders ?? [];
+
+  // If a specific model was requested, only select providers OpenCode reports as connected.
   if (modelId) {
-    for (const [pid, model] of Object.entries(_cachedProviderMap)) {
+    for (const [pid, model] of Object.entries(_cachedProviderMap).filter(([pid]) => connected.includes(pid))) {
       if (model === modelId) return pid;
     }
-    for (const [pid, models] of Object.entries(_cachedProviderModels ?? {})) {
+    for (const [pid, models] of Object.entries(_cachedProviderModels ?? {}).filter(([pid]) => connected.includes(pid))) {
       if (models.includes(modelId)) return pid;
+    }
+    const existsButDisconnected = Object.values(_cachedProviderModels ?? {}).some((models) => models.includes(modelId));
+    if (existsButDisconnected) {
+      throw new Error(`OpenCode model "${modelId}" is not available on a connected provider. Connected providers: ${connected.join(", ") || "none"}.`);
     }
   }
 
   // Prefer OpenCode Zen/OpenAI/ChatGPT when no exact model/provider match is available.
-  const openAiEntry = Object.entries(_cachedProviderMap).find(([pid]) => isPreferredGptProvider(pid));
+  const connectedDefaults = Object.entries(_cachedProviderMap).filter(([pid]) => connected.includes(pid));
+  const openAiEntry = connectedDefaults.find(([pid]) => isPreferredGptProvider(pid));
   if (openAiEntry) return openAiEntry[0];
 
-  const first = Object.entries(_cachedProviderMap)[0];
+  const first = connectedDefaults[0] ?? Object.entries(_cachedProviderMap)[0];
   return first?.[0] ?? "";
 }
 
@@ -325,17 +349,20 @@ async function sendToOpenCode(
   variant: string | undefined,
   directory?: string,
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  const sessionId = await ensureSession(baseUrl, providerID, modelId, directory);
+  const sessionId = await ensureSession(baseUrl, providerID, modelId, variant, directory);
 
   const body: Record<string, unknown> = {
     messageID: createMessageId(),
+    agent: "build",
     parts: [{ type: "text", text: userMessage }],
-    model: modelId ? { modelID: modelId, providerID } : null,
     variant: variant || "low",
   };
   if (system) body.system = system;
+  const messagePath = directory
+    ? `/session/${sessionId}/message?directory=${encodeURIComponent(directory)}`
+    : `/session/${sessionId}/message`;
 
-  const msgRes = await apiFetch(baseUrl, `/session/${sessionId}/message`, {
+  const msgRes = await apiFetch(baseUrl, messagePath, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -371,18 +398,22 @@ async function openCodeStreamFromEvents(
   await iter.next();
 
   // Create or reuse session in the correct project directory
-  const sessionId = await ensureSession(baseUrl, providerID, modelId, directory);
+  const sessionId = await ensureSession(baseUrl, providerID, modelId, variant, directory);
 
   // Send message asynchronously — returns 204 immediately
   const messageID = createMessageId();
   const body: Record<string, unknown> = {
     messageID,
+    agent: "build",
+    model: modelId ? { modelID: modelId, providerID } : undefined,
     parts: [{ type: "text", text: userMessage }],
-    model: modelId ? { modelID: modelId, providerID } : null,
     variant: variant || "low",
   };
   if (system) body.system = system;
-  await apiFetch(baseUrl, `/session/${sessionId}/prompt_async`, {
+  const promptPath = directory
+    ? `/session/${sessionId}/prompt_async?directory=${encodeURIComponent(directory)}`
+    : `/session/${sessionId}/prompt_async`;
+  await apiFetch(baseUrl, promptPath, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -420,13 +451,6 @@ async function openCodeStreamFromEvents(
 
           const eventType = event.type;
 
-          const eventMessageID =
-            (props.messageID as string | undefined) ??
-            ((props.info as Record<string, unknown> | undefined)?.id as string | undefined) ??
-            ((props.part as Record<string, unknown> | undefined)?.messageID as string | undefined);
-          if (eventMessageID && eventMessageID !== messageID) continue;
-          if (eventMessageID === messageID) sawMessageEvent = true;
-
           // Skip setup/heartbeat events
           if (
             eventType === "server.connected" ||
@@ -437,11 +461,13 @@ async function openCodeStreamFromEvents(
             eventType === "session.diff"
           ) continue;
 
-          if (eventType === "message.part.delta") {
+          sawMessageEvent = true;
+
+          if (eventType === "message.part.updated") {
             // Incremental text delta from the model
-            const field = props.field as string | undefined;
             const delta = props.delta as string | undefined;
-            if (field === "text" && delta) {
+            const part = props.part as Record<string, unknown> | undefined;
+            if (part?.type === "text" && delta) {
               if (!textStarted) {
                 ctrl.enqueue({ type: "text-start", id: textId });
                 textStarted = true;
@@ -506,20 +532,405 @@ async function openCodeStreamFromEvents(
   });
 }
 
+async function generateWithOpenCodeEvents(
+  baseUrl: string,
+  providerID: string,
+  modelId: string | undefined,
+  systemPrompt: string,
+  userMessage: string,
+  variant: string | undefined,
+  directory: string | undefined,
+  abortHandle: AbortHandle | undefined,
+  callbacks: GenerateCallbacks,
+): Promise<DirectGenerateResult> {
+  const sseAbortController = new AbortController();
+  _activeSseController = sseAbortController;
+
+  const eventIter = sseEventStream(`${baseUrl}/event`, sseAbortController.signal);
+  const iter = eventIter[Symbol.asyncIterator]();
+
+  try {
+    // First event is server.connected; subscribing before prompt_async avoids missing early deltas.
+    await iter.next();
+
+    const sessionId = await ensureSession(baseUrl, providerID, modelId, variant, directory);
+    const body: Record<string, unknown> = {
+      messageID: createMessageId(),
+      agent: "build",
+      model: modelId ? { modelID: modelId, providerID } : undefined,
+      parts: [{ type: "text", text: userMessage }],
+      variant: variant || "low",
+    };
+    if (systemPrompt) body.system = systemPrompt;
+
+    const promptPath = directory
+      ? `/session/${sessionId}/prompt_async?directory=${encodeURIComponent(directory)}`
+      : `/session/${sessionId}/prompt_async`;
+    await apiFetch(baseUrl, promptPath, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    let text = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let sawSessionEvent = false;
+
+    while (!abortHandle?.aborted) {
+      const { done, value } = await iter.next();
+      if (done) break;
+
+      const event = value?.data as {
+        type?: string;
+        properties?: Record<string, unknown>;
+      } | undefined;
+      if (!event?.type || !event?.properties) continue;
+
+      const props = event.properties;
+      const eventSid = props.sessionID as string | undefined;
+      if (eventSid !== undefined && eventSid !== sessionId) continue;
+      if (eventSid === sessionId) sawSessionEvent = true;
+
+      if (event.type === "message.part.updated") {
+        const delta = props.delta as string | undefined;
+        const part = props.part as Record<string, unknown> | undefined;
+        if (part?.type === "text" && delta) {
+          text += delta;
+          callbacks.onToken(delta);
+        }
+      } else if (event.type === "session.error") {
+        const error = props.error as { data?: { message?: string }; message?: string; name?: string } | undefined;
+        throw new Error(error?.data?.message ?? error?.message ?? error?.name ?? "OpenCode session error");
+      } else if (event.type === "message.part.updated") {
+        const part = props.part as Record<string, unknown> | undefined;
+        if (part?.type === "step-finish") {
+          const tokens = part.tokens as Record<string, unknown> | undefined;
+          inputTokens = (tokens?.input as number) ?? inputTokens;
+          outputTokens = (tokens?.output as number) ?? outputTokens;
+        }
+      } else if (event.type === "message.updated") {
+        const info = props.info as Record<string, unknown> | undefined;
+        const tokens = info?.tokens as Record<string, unknown> | undefined;
+        inputTokens = (tokens?.input as number) ?? inputTokens;
+        outputTokens = (tokens?.output as number) ?? outputTokens;
+      } else if (event.type === "session.status") {
+        const status = props.status as { type?: string } | undefined;
+        if (status?.type === "idle" && sawSessionEvent) break;
+      } else if (event.type === "session.idle" && sawSessionEvent) {
+        break;
+      }
+    }
+
+    return { text, inputTokens, outputTokens, streamed: true };
+  } finally {
+    _activeSseController = null;
+    sseAbortController.abort();
+  }
+}
+
+async function generateWithOpenCodeCli(
+  baseUrl: string,
+  providerID: string,
+  modelId: string | undefined,
+  systemPrompt: string,
+  userMessage: string,
+  variant: string | undefined,
+  directory: string | undefined,
+  abortHandle: AbortHandle | undefined,
+  callbacks: GenerateCallbacks,
+): Promise<DirectGenerateResult> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "run",
+      "--attach",
+      baseUrl,
+      "--agent",
+      "build",
+      "--format",
+      "json",
+    ];
+    if (directory) args.push("--dir", directory);
+    if (modelId) args.push("--model", `${providerID}/${modelId}`);
+    if (variant) args.push("--variant", variant);
+
+    const child = spawn("opencode", args, {
+      cwd: directory,
+      shell: process.platform === "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
+    let text = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let settled = false;
+
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(abortTimer);
+      if (err) reject(err);
+      else resolve({ text, inputTokens, outputTokens, streamed: true });
+    };
+
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      let event: {
+        type?: string;
+        part?: { type?: string; text?: string; tokens?: { input?: number; output?: number; total?: number } };
+      };
+      try {
+        event = JSON.parse(line);
+      } catch {
+        callbacks.onLog?.(`[opencode] ${line}`);
+        return;
+      }
+
+      if (event.type === "text" && event.part?.text) {
+        text += event.part.text;
+        callbacks.onToken(event.part.text);
+      } else if (event.type === "step_finish" && event.part?.tokens) {
+        inputTokens = event.part.tokens.input ?? inputTokens;
+        outputTokens = event.part.tokens.output ?? outputTokens;
+      } else if (event.type === "tool") {
+        callbacks.onLog?.(`[opencode] tool event`);
+      }
+    };
+
+    const abortTimer = setInterval(() => {
+      if (abortHandle?.aborted) child.kill();
+    }, 250);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString("utf8");
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) handleLine(line);
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      const textChunk = chunk.toString("utf8");
+      stderrBuffer += textChunk;
+      for (const line of textChunk.split(/\r?\n/)) {
+        if (line.trim()) callbacks.onLog?.(`[opencode] ${line}`);
+      }
+    });
+
+    child.on("error", (err) => finish(err));
+    child.on("close", (code) => {
+      if (stdoutBuffer.trim()) handleLine(stdoutBuffer);
+      if (abortHandle?.aborted) {
+        finish();
+      } else if (code === 0) {
+        finish();
+      } else {
+        finish(new Error(`opencode run exited with code ${code}: ${stderrBuffer.trim()}`));
+      }
+    });
+
+    child.stdin.end(`${systemPrompt}\n\n${userMessage}`);
+  });
+}
+
+async function generateWithOpenCodeAcp(
+  providerID: string,
+  modelId: string | undefined,
+  systemPrompt: string,
+  userMessage: string,
+  variant: string | undefined,
+  directory: string | undefined,
+  abortHandle: AbortHandle | undefined,
+  callbacks: GenerateCallbacks,
+): Promise<DirectGenerateResult> {
+  return new Promise((resolve, reject) => {
+    const args = ["acp"];
+    if (directory) args.push("--cwd", directory);
+
+    const child = spawn("opencode", args, {
+      cwd: directory,
+      shell: process.platform === "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
+    let nextId = 1;
+    let sessionId: string | null = null;
+    let text = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let settled = false;
+    const pending = new Map<number, string>();
+
+    const send = (method: string, params: Record<string, unknown>): number => {
+      const id = nextId++;
+      pending.set(id, method);
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      return id;
+    };
+
+    const respond = (id: number, result: Record<string, unknown>): void => {
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+    };
+
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(abortTimer);
+      if (!child.killed) child.kill();
+      if (err) reject(err);
+      else resolve({ text, inputTokens, outputTokens, streamed: true });
+    };
+
+    const firstPermissionOption = (message: Record<string, unknown>): string => {
+      const options = ((message.params as Record<string, unknown> | undefined)?.options ?? []) as Array<{ optionId?: string }>;
+      return options[0]?.optionId ?? "allow_once";
+    };
+
+    const handleUpdate = (update: Record<string, unknown>): void => {
+      const updateType = update.sessionUpdate as string | undefined;
+      const content = update.content as { type?: string; text?: string } | undefined;
+
+      if (updateType === "agent_message_chunk" && content?.type === "text" && content.text) {
+        text += content.text;
+        callbacks.onToken(content.text);
+      } else if (updateType === "usage_update") {
+        const used = update.used as number | undefined;
+        if (used) inputTokens = used;
+      } else if (updateType === "tool_call") {
+        callbacks.onLog?.("[opencode] tool call");
+      } else if (updateType && updateType !== "agent_thought_chunk" && updateType !== "available_commands_update") {
+        callbacks.onLog?.(`[opencode] ${updateType}`);
+      }
+    };
+
+    const handleMessage = (message: Record<string, unknown>): void => {
+      const id = message.id as number | undefined;
+      const method = message.method as string | undefined;
+
+      if (id !== undefined && method) {
+        if (method === "session/request_permission") {
+          respond(id, { outcome: { outcome: "selected", optionId: firstPermissionOption(message) } });
+        } else {
+          respond(id, {});
+        }
+        return;
+      }
+
+      if (method === "session/update") {
+        const params = message.params as { update?: Record<string, unknown> } | undefined;
+        if (params?.update) handleUpdate(params.update);
+        return;
+      }
+
+      if (id === undefined) return;
+      const pendingMethod = pending.get(id);
+      pending.delete(id);
+
+      if (message.error) {
+        const error = message.error as { message?: string };
+        finish(new Error(error.message ?? `OpenCode ACP ${pendingMethod ?? "request"} failed`));
+        return;
+      }
+
+      const result = message.result as Record<string, unknown> | undefined;
+      if (pendingMethod === "initialize") {
+        send("session/new", { cwd: directory ?? process.cwd(), mcpServers: [] });
+      } else if (pendingMethod === "session/new") {
+        sessionId = result?.sessionId as string | null;
+        if (!sessionId) {
+          finish(new Error("OpenCode ACP did not return a sessionId"));
+          return;
+        }
+        if (modelId) {
+          send("session/set_config_option", {
+            sessionId,
+            configId: "model",
+            value: `${providerID}/${modelId}`,
+          });
+        } else {
+          send("session/prompt", {
+            sessionId,
+            prompt: [{ type: "text", text: `${systemPrompt}\n\n${userMessage}` }],
+          });
+        }
+      } else if (pendingMethod === "session/set_config_option") {
+        if (sessionId) {
+          send("session/prompt", {
+            sessionId,
+            prompt: [{ type: "text", text: `${systemPrompt}\n\n${userMessage}` }],
+          });
+        }
+      } else if (pendingMethod === "session/prompt") {
+        const usage = result?.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        inputTokens = usage?.inputTokens ?? inputTokens;
+        outputTokens = usage?.outputTokens ?? outputTokens;
+        finish();
+      }
+    };
+
+    const handleLine = (line: string): void => {
+      if (!line.trim()) return;
+      try {
+        handleMessage(JSON.parse(line) as Record<string, unknown>);
+      } catch {
+        callbacks.onLog?.(`[opencode] ${line}`);
+      }
+    };
+
+    const abortTimer = setInterval(() => {
+      if (abortHandle?.aborted) finish();
+    }, 250);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString("utf8");
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? "";
+      for (const line of lines) handleLine(line);
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      const textChunk = chunk.toString("utf8");
+      stderrBuffer += textChunk;
+      for (const line of textChunk.split(/\r?\n/)) {
+        if (line.trim()) callbacks.onLog?.(`[opencode] ${line}`);
+      }
+    });
+
+    child.on("error", (err) => finish(err));
+    child.on("close", (code) => {
+      if (settled) return;
+      if (stdoutBuffer.trim()) handleLine(stdoutBuffer);
+      if (abortHandle?.aborted) finish();
+      else finish(new Error(`opencode acp exited with code ${code}: ${stderrBuffer.trim()}`));
+    });
+
+    send("initialize", {
+      protocolVersion: 1,
+      clientInfo: { name: "specwright-desktop", version: "0.2.0" },
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+      },
+    });
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /*  The opencode provider strategy                                     */
 /* ------------------------------------------------------------------ */
 
 export const opencodeProvider: LLMProvider = {
   name: "opencode",
-  supportsTools: true,
+  supportsTools: false,
 
   async createModel(config: ProviderConfig): Promise<LanguageModel> {
     const baseUrl = config.opencodeUrl ?? "http://127.0.0.1:18789";
-    const modelId = config.modelName;
+    const modelId = normalizeModelId(config.modelName);
     const variant = config.opencodeVariant || "low";
     const directory = config.projectPath;
-    const providerID = await resolveProviderId(baseUrl, modelId || undefined);
+    const providerID = config.opencodeProviderId || await resolveProviderId(baseUrl, modelId || undefined);
 
     const model: Record<string, unknown> = {
       specificationVersion: "v3",
@@ -562,28 +973,45 @@ export const opencodeProvider: LLMProvider = {
     config: ProviderConfig,
     systemPrompt: string,
     userMessage: string,
-    abortHandle?: AbortHandle
+    abortHandle?: AbortHandle,
+    callbacks?: GenerateCallbacks
   ): Promise<DirectGenerateResult> {
     const baseUrl = config.opencodeUrl ?? "http://127.0.0.1:18789";
-    const modelId = config.modelName;
+    const modelId = normalizeModelId(config.modelName);
     const variant = config.opencodeVariant || "low";
     const directory = config.projectPath;
 
     if (abortHandle?.aborted) return { text: "", inputTokens: 0, outputTokens: 0 };
 
-    const providerID = await resolveProviderId(baseUrl, modelId || undefined);
+    const providerID = config.opencodeProviderId || await resolveProviderId(baseUrl, modelId || undefined);
 
-    const sessionId = await ensureSession(baseUrl, providerID, modelId || undefined, directory);
+    if (callbacks) {
+      return generateWithOpenCodeAcp(
+        providerID,
+        modelId || undefined,
+        systemPrompt,
+        userMessage,
+        variant,
+        directory,
+        abortHandle,
+        callbacks,
+      );
+    }
+
+    const sessionId = await ensureSession(baseUrl, providerID, modelId || undefined, variant, directory);
 
     const body: Record<string, unknown> = {
       messageID: createMessageId(),
+      agent: "build",
       parts: [{ type: "text", text: userMessage }],
-      model: modelId ? { modelID: modelId, providerID } : null,
       variant,
     };
     if (systemPrompt) body.system = systemPrompt;
+    const messagePath = directory
+      ? `/session/${sessionId}/message?directory=${encodeURIComponent(directory)}`
+      : `/session/${sessionId}/message`;
 
-    const msgRes = await apiFetch(baseUrl, `/session/${sessionId}/message`, {
+    const msgRes = await apiFetch(baseUrl, messagePath, {
       method: "POST",
       body: JSON.stringify(body),
     });
