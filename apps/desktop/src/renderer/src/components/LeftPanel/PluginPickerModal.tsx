@@ -81,17 +81,17 @@ export function PluginPickerModal({
       onMouseDown={handleBackdropClick}
     >
       <div
-        className="operator-panel operator-modal-md border shadow-2xl"
+        className="operator-panel operator-plugin-modal operator-modal-md border shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleModalKeyDown}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-operator-line">
-          <div>
-            <h2 className="text-stone-200 text-sm font-semibold">Select Plugin</h2>
-            <p className="operator-muted text-xs mt-1">Plugins configure your test framework for your app</p>
+        <div className="flex items-start justify-between gap-4 px-4 py-3 border-b border-operator-line">
+          <div className="min-w-0">
+            <h2 className="operator-plugin-title">Choose test framework plugin</h2>
+            <p className="operator-plugin-description">A plugin is the project adapter: it installs Playwright BDD files, agents, skills, and app-specific helper code.</p>
           </div>
-          <button onClick={onClose} className="operator-muted hover:text-stone-300 text-xs">Close</button>
+          <button onClick={onClose} className="operator-button-quiet px-2 py-1 shrink-0">Close</button>
         </div>
 
         <div className="flex border-b border-operator-line">
@@ -99,9 +99,9 @@ export function PluginPickerModal({
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`flex-1 text-xs py-2 transition-colors ${tab === t ? "text-brand-400 border-b border-brand-400" : "operator-muted hover:text-stone-300"}`}
+              className={`operator-plugin-tab ${tab === t ? "operator-plugin-tab-active" : ""}`}
             >
-              {t === "local" ? "Local" : "npm"}
+              {t === "local" ? "Local folder" : "npm package"}
             </button>
           ))}
         </div>
@@ -109,13 +109,13 @@ export function PluginPickerModal({
         <div className="px-4 py-3 space-y-3">
           {tab === "local" && (
             <>
-              <p className="operator-muted text-xs">Browse to your org's plugin directory. It must contain a <span className="font-mono text-stone-400">specwright.plugin.json</span> file.</p>
+              <p className="operator-plugin-description">Use this when your team has a custom project adapter in another repo. Select the folder that contains <span className="font-mono">specwright.plugin.json</span>.</p>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={localPath}
                   onChange={(e) => { setLocalPath(e.target.value); validateDir(e.target.value); }}
-                  placeholder="/path/to/plugin-directory"
+                  placeholder="Path to plugin folder"
                   className={`${inputCls} flex-1`}
                 />
                 <button
@@ -125,10 +125,10 @@ export function PluginPickerModal({
                   Browse
                 </button>
               </div>
-              {validating && <p className="operator-muted text-xs">Validating…</p>}
+              {validating && <p className="operator-plugin-description">Checking plugin folder...</p>}
               {!validating && localValidation && (
                 localValidation.valid ? (
-                  <p className="text-[var(--sw-success)] text-xs"><span className="font-mono">{localValidation.pluginName}</span></p>
+                   <p className="text-[var(--sw-success)] text-xs">Valid plugin: <span className="font-mono">{localValidation.pluginName}</span></p>
                 ) : (
                   <p className="operator-danger text-xs">{localValidation.error}</p>
                 )
@@ -138,9 +138,9 @@ export function PluginPickerModal({
 
           {tab === "npm" && (
             <>
-              <p className="operator-muted text-xs">Install a plugin from npm. Use your org's private registry if the plugin is not public.</p>
+               <p className="operator-plugin-description">Use this when your project adapter is published as an npm package. Private packages can use your team registry.</p>
               <div>
-                <label className="operator-control-label">Package name</label>
+                <label className="operator-control-label">npm package</label>
                 <input
                   type="text"
                   value={npmPackage}
@@ -148,10 +148,10 @@ export function PluginPickerModal({
                   placeholder="@specwright/plugin-mui"
                   className={inputCls}
                 />
-                <p className="operator-muted text-xs mt-1">Convention: <span className="font-mono">@specwright/plugin-*</span></p>
+                <p className="operator-plugin-description mt-1">Usually named <span className="font-mono">@specwright/plugin-*</span>.</p>
               </div>
               <div>
-                <label className="operator-control-label">Registry <span className="operator-muted">(optional)</span></label>
+                <label className="operator-control-label">Private registry <span className="operator-muted">— optional</span></label>
                 <input
                   type="text"
                   value={npmRegistry}
@@ -165,11 +165,11 @@ export function PluginPickerModal({
         </div>
 
         <div className="flex items-center justify-between px-4 py-3 border-t border-operator-line">
-          <button
-            onClick={() => { onReset(); onClose(); }}
-            className="operator-muted hover:text-stone-300 text-xs transition-colors"
-          >
-            Use default
+              <button
+                onClick={() => { onReset(); onClose(); }}
+                className="operator-button-quiet px-2 py-1"
+              >
+            Use Specwright default
           </button>
           <div className="flex gap-2">
             <button onClick={onClose} className="operator-button">
@@ -180,7 +180,7 @@ export function PluginPickerModal({
               disabled={!canApply}
               className="operator-button-primary disabled:opacity-40"
             >
-              Select
+              Use plugin
             </button>
           </div>
         </div>

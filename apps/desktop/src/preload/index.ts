@@ -94,9 +94,24 @@ contextBridge.exposeInMainWorld("specwright", {
       ipcRenderer.on("pipeline:error", (_e, data) => cb(data));
       return () => ipcRenderer.removeAllListeners("pipeline:error");
     },
+    onAborted: (cb: (data: { fullText: string; userMessage?: string }) => void) => {
+      ipcRenderer.on("pipeline:aborted", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("pipeline:aborted");
+    },
     onLog: (cb: (data: { line: string }) => void) => {
       ipcRenderer.on("pipeline:log", (_e, data) => cb(data));
       return () => ipcRenderer.removeAllListeners("pipeline:log");
+    },
+    onDirectRunUpdate: (cb: (data: {
+      command?: string | null;
+      cwd?: string | null;
+      browserUrl?: string | null;
+      localApps?: "pending" | "running" | "done" | "error";
+      auth?: "pending" | "running" | "done" | "error";
+      tests?: "pending" | "running" | "done" | "error";
+    }) => void) => {
+      ipcRenderer.on("pipeline:direct-run-update", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("pipeline:direct-run-update");
     },
     onPermissionRequest: (
       cb: (data: { id: string; toolName: string; toolInput: Record<string, unknown>; description: string }) => void
@@ -188,5 +203,7 @@ contextBridge.exposeInMainWorld("specwright", {
       ipcRenderer.invoke("report:open-playwright", projectPath) as Promise<void>,
     openBdd: (projectPath: string) =>
       ipcRenderer.invoke("report:open-bdd", projectPath) as Promise<void>,
+    startTestReport: (projectPath: string) =>
+      ipcRenderer.invoke("report:start-test-report", projectPath) as Promise<{ url: string }>,
   },
 });

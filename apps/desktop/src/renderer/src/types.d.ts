@@ -62,6 +62,7 @@ interface ReportAPI {
   checkAvailable: (projectPath: string) => Promise<{ playwright: boolean; bdd: boolean }>;
   openPlaywright: (projectPath: string) => Promise<void>;
   openBdd: (projectPath: string) => Promise<void>;
+  startTestReport: (projectPath: string) => Promise<{ url: string }>;
 }
 
 interface WindowControlsAPI {
@@ -122,15 +123,24 @@ interface SpecwrightAPI {
       mode?: "claude-code";
       skipPermissions?: boolean;
     }) => Promise<void>;
-    abort: () => Promise<void>;
-    interrupt: () => Promise<void>;
+    abort: () => Promise<{ ok: boolean; state?: string }>;
+    interrupt: () => Promise<{ ok: boolean; reason?: string }>;
     sendMessage: (text: string, priority?: "now" | "next") => Promise<void>;
     respondPermission: (requestId: string, allowed: boolean) => Promise<void>;
     readContextFiles: () => Promise<{ plan: string; seed: string; conventions: string }>;
     onToken: (cb: (data: { token: string }) => void) => () => void;
     onDone: (cb: (data: { fullText: string; sessionId?: string; userMessage?: string }) => void) => () => void;
     onError: (cb: (data: { error: string }) => void) => () => void;
+    onAborted: (cb: (data: { fullText: string; userMessage?: string }) => void) => () => void;
     onLog: (cb: (data: { line: string }) => void) => () => void;
+    onDirectRunUpdate: (cb: (data: {
+      command?: string | null;
+      cwd?: string | null;
+      browserUrl?: string | null;
+      localApps?: "pending" | "running" | "done" | "error";
+      auth?: "pending" | "running" | "done" | "error";
+      tests?: "pending" | "running" | "done" | "error";
+    }) => void) => () => void;
     onPermissionRequest: (cb: (data: PermissionRequestData) => void) => () => void;
     onToolStart: (cb: (data: ToolEventData) => void) => () => void;
     onToolEnd: (cb: (data: ToolEventData) => void) => () => void;
@@ -168,6 +178,16 @@ interface SpecwrightAPI {
 declare global {
   interface Window {
     specwright: SpecwrightAPI;
+  }
+
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & {
+        src?: string;
+        allowpopups?: string;
+        partition?: string;
+      };
+    }
   }
 }
 

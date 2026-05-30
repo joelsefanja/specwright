@@ -108,7 +108,7 @@ function ChatInput(): React.JSX.Element {
   return (
     <div className="operator-toolbar">
       {!canRun && (
-        <p className="text-amber-400 text-xs mb-2">
+        <p className="operator-danger text-xs mb-2">
           Add an API key or log in with Claude Code to start chatting.
         </p>
       )}

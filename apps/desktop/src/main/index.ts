@@ -29,6 +29,17 @@ let mainWindow: BrowserWindow | null = null;
 
 const configService = new ConfigService();
 const projectService = new ProjectService();
+const APP_USER_MODEL_ID = "com.specwright.desktop";
+const CDP_PORT = process.env.SPECWRIGHT_DESKTOP_CDP_PORT || "9333";
+const appIconPath = join(app.getAppPath(), "build", "icon.png");
+
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+app.commandLine.appendSwitch("remote-debugging-port", CDP_PORT);
+
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
+}
+app.setName("Specwright");
 
 function registerWindowIpc(): void {
   ipcMain.handle("window:minimize", () => mainWindow?.minimize());
@@ -47,7 +58,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     title: "Specwright",
-    icon: join(__dirname, "../../build/icon.png"),
+    icon: appIconPath,
     backgroundColor: "#11100e",
     autoHideMenuBar: process.platform !== "darwin",
     fullscreen: true,
@@ -57,6 +68,7 @@ function createWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      webviewTag: true,
     },
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },

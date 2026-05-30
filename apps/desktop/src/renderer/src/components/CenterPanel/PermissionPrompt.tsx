@@ -14,14 +14,10 @@ function ToolCode({ toolName }: { toolName: string }): React.JSX.Element {
   return <span className="operator-label text-brand-400 w-7">{codes[toolName] ?? "TL"}</span>;
 }
 
-/** Severity color based on tool type */
 function getSeverityColor(toolName: string): string {
-  // Destructive or write operations get amber/orange
-  if (["Bash", "Write"].includes(toolName)) return "border-amber-500/60 bg-amber-950/30";
-  // Edit is moderate
-  if (toolName === "Edit") return "border-yellow-500/50 bg-yellow-950/20";
-  // Read-only operations are green/safe
-  return "border-brand-500/40 bg-brand-950/20";
+  if (["Bash", "Write"].includes(toolName)) return "border-[var(--sw-danger)] bg-[color-mix(in_srgb,var(--sw-danger)_10%,transparent)]";
+  if (toolName === "Edit") return "border-[var(--sw-accent)] bg-[var(--sw-accent-soft)]";
+  return "border-[var(--sw-line)] bg-[var(--sw-surface)]";
 }
 
 export default function PermissionPrompt(): React.JSX.Element | null {

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useReducer } from "react";
-import { ArrowLeft, Copy, Pause, Play, Prohibit, PaperPlaneTilt } from "@phosphor-icons/react";
+import { Copy, Pause, PaperPlaneTilt } from "@phosphor-icons/react";
 import PermissionPrompt from "./PermissionPrompt";
 import { PhaseHeader } from "./PhaseHeader";
+import { RunConsolePanel } from "./RunConsolePanel";
 import { usePipelineStore, type ChatMessage } from "@renderer/store/pipeline.store";
 import { useConfigStore } from "@renderer/store/config.store";
 
@@ -68,6 +69,9 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [inputText, setInputText] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const [controlFeedback, setControlFeedback] = useState<string | null>(null);
+  const [abortRequested, setAbortRequested] = useState(false);
+  const abortBackRequestedRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -109,7 +113,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
   }, []);
 
   const isRunning = status === "running";
-
+  const isDirectTestRun = [...messages].reverse().some((message) => message.role === "user" && message.content.trim().startsWith("/e2e-run"));
   const activeTool = (() => {
     for (let i = logLines.length - 1; i >= 0; i--) {
       const line = logLines[i];
@@ -123,6 +127,66 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
     }
     return null;
   })();
+  const runStatusTitle = abortRequested
+    ? "Stopping run"
+    : activeTool
+      ? activeTool
+      : isRunning
+        ? "Run in progress"
+        : status === "done"
+          ? "Run complete"
+          : status === "aborted"
+            ? "Run aborted"
+            : status === "error"
+              ? "Run failed"
+              : "Session";
+  const runStatusDetail = abortRequested
+    ? "Specwright is stopping the active process. This can take a few seconds."
+    : activeTool
+      ? "A tool or command is active. Raw output appears in Run output."
+      : isRunning
+        ? "Specwright is generating, running, or waiting for the current command."
+        : status === "done"
+          ? "Review the result, run tests, or return to Explorer."
+          : status === "aborted"
+            ? "The run was stopped. Return to Create Tests when you want to continue."
+            : status === "error"
+              ? errorMessage ?? "Check Run output for the failing command."
+              : "No active run.";
+
+  const requestAbort = useCallback(async (): Promise<boolean> => {
+    setAbortRequested(true);
+    setControlFeedback("Abort requested...");
+    const result = await window.specwright.pipeline.abort() as unknown as { ok?: boolean };
+    setControlFeedback(result.ok ? "Stopping run..." : "Nothing to abort");
+    if (!result.ok) setAbortRequested(false);
+    return Boolean(result.ok);
+  }, []);
+
+  const abortAndBack = useCallback(async () => {
+    abortBackRequestedRef.current = true;
+    const requested = await requestAbort();
+    if (requested) {
+      setControlFeedback("Stopping run, then returning to Create Tests...");
+      return;
+    }
+    abortBackRequestedRef.current = false;
+  }, [requestAbort]);
+
+  useEffect(() => {
+    if (isRunning) return;
+    setAbortRequested(false);
+    if (abortBackRequestedRef.current) {
+      abortBackRequestedRef.current = false;
+      clearFeed();
+    }
+  }, [clearFeed, isRunning]);
+
+  useEffect(() => {
+    if (!controlFeedback) return;
+    const timer = window.setTimeout(() => setControlFeedback(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [controlFeedback]);
 
   const handleCopy = useCallback((id: string, text: string) => {
     if (!text) return;
@@ -210,42 +274,56 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
   }, [handleSend]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="operator-run-view flex flex-col h-full overflow-hidden">
       {/* Top bar */}
-      <div className="operator-toolbar-compact flex items-center justify-between">
-        <div className="operator-toolbar-actions">
-          {isRunning && !activeTool && (
-            <>
-              <span className="w-2 h-2 bg-brand-400 animate-pulse" />
-              <span className="operator-label text-brand-400">Engine Running</span>
-            </>
-          )}
-          {isRunning && activeTool && (
-            <>
-              <span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent animate-spin" />
-              <span className="text-yellow-300 text-xs font-mono">{activeTool}</span>
-              <span className="text-stone-500 text-xs">running</span>
-            </>
-          )}
-          {status === "done" && <span className="operator-label text-[var(--sw-success)]">Complete</span>}
-          {status === "error" && <span className="operator-danger text-xs">Error: {errorMessage ?? "Unknown failure"}</span>}
+      <div className="operator-runbar">
+        <div className="operator-run-status">
+          <span
+            className={`operator-run-dot ${
+              abortRequested ? "operator-run-dot-warning" :
+              isRunning ? "operator-run-dot-active" :
+              status === "error" ? "operator-run-dot-danger" :
+              status === "done" ? "operator-run-dot-success" :
+              status === "aborted" ? "operator-run-dot-warning" : ""
+            }`}
+          />
+          <div className="min-w-0">
+            <p className="operator-run-title">{runStatusTitle}</p>
+            <p className="operator-run-detail">{controlFeedback ?? runStatusDetail}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {isRunning && (
             <>
+              {!isDirectTestRun && (
+                <button
+                  onClick={async () => {
+                    setControlFeedback("Interrupt requested...");
+                    const result = await window.specwright.pipeline.interrupt() as unknown as { ok?: boolean; reason?: string };
+                    setControlFeedback(result.ok ? "Interrupt sent" : result.reason === "test-process" ? "Tests cannot pause; use Abort" : "Nothing to interrupt");
+                  }}
+                  disabled={abortRequested}
+                  className="operator-button operator-button-compact text-[var(--sw-accent-strong)] hover:border-[var(--sw-accent)] hover:text-[var(--sw-accent-strong)]"
+                  title="Pause Claude — stops current turn, you can type new instructions"
+                >
+                  <Pause className="operator-icon" weight="bold" /> Interrupt
+                </button>
+              )}
               <button
-                onClick={() => window.specwright.pipeline.interrupt()}
-                className="operator-button py-1 text-[var(--sw-warning)] hover:border-[var(--sw-warning)] hover:text-[var(--sw-warning)]"
-                title="Pause Claude — stops current turn, you can type new instructions"
+                onClick={requestAbort}
+                disabled={abortRequested}
+                className="operator-button operator-button-compact operator-danger hover:border-[var(--sw-danger)] disabled:opacity-60"
+                title="Stop the current generation or test process"
               >
-                <Pause className="operator-icon" weight="bold" /> Interrupt
+                {abortRequested ? "Stopping" : "Abort run"}
               </button>
               <button
-                onClick={() => window.specwright.pipeline.abort()}
-                className="operator-button py-1 operator-danger hover:border-[var(--sw-danger)]"
-                title="Kill the session completely"
+                onClick={abortAndBack}
+                disabled={abortRequested}
+                className="operator-button operator-button-compact operator-danger hover:border-[var(--sw-danger)] disabled:opacity-40"
+                title="Stop the run and return to Create Tests"
               >
-                <Prohibit className="operator-icon" weight="bold" /> Abort
+                Abort and back
               </button>
             </>
           )}
@@ -253,23 +331,37 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             <>
               <button
                 onClick={onOpenRunPicker}
-                className="operator-button operator-toolbar-action-primary py-1 text-[var(--sw-accent-strong)] hover:border-[var(--sw-accent)] hover:text-[var(--sw-accent-strong)]"
+                className="operator-button operator-button-compact operator-toolbar-action-primary text-[var(--sw-accent-strong)] hover:border-[var(--sw-accent)] hover:text-[var(--sw-accent-strong)]"
               >
-                <Play className="operator-icon" weight="fill" /> Run Tests
+                Run Tests
               </button>
               <button
                 onClick={clearFeed}
-                className="operator-button py-1"
+                className="operator-button operator-button-compact"
               >
-                <ArrowLeft className="operator-icon" weight="bold" /> Back
+                Back to Create Tests
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Message thread */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3 bg-operator-canvas">
+      {isDirectTestRun ? (
+        <div className="operator-run-stage flex-1 min-h-0 overflow-hidden bg-operator-canvas p-5">
+          <RunConsolePanel logLines={logLines} status={status} errorMessage={errorMessage} />
+        </div>
+      ) : (
+      <div className="operator-run-stage flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3 bg-operator-canvas" data-tab-staging="true">
+        {messages.length > 0 && (
+          <div className="operator-inline-panel">
+            <p className="operator-label operator-text-accent">Session</p>
+              <p className="operator-field-help">
+                {isRunning
+                  ? "Follow the active phase here. If a browser/test command is running, the right Run output panel shows the raw command stream."
+                  : "Review the generated summary here, then run tests or go back to Create Tests to adjust the instructions."}
+            </p>
+          </div>
+        )}
         {isRunning && messages.length === 0 && (
           <div className="flex items-center gap-3 text-stone-500 text-sm">
             <span className="w-4 h-4 border-2 border-brand-500 border-t-transparent animate-spin" />
@@ -286,7 +378,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
               return (
                 <div key={msg.id} className="flex justify-end">
                   <div className="border border-[color-mix(in_srgb,var(--sw-accent)_36%,transparent)] bg-[var(--sw-accent-soft)] px-4 py-2 max-w-[85%]">
-                    <p className="text-brand-200 text-sm whitespace-pre-wrap select-text cursor-text">{msg.content}</p>
+                    <p className="operator-message-user-text whitespace-pre-wrap select-text cursor-text">{msg.content}</p>
                   </div>
                 </div>
               );
@@ -295,7 +387,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             return (
               <div key={msg.id} className="group/msg relative">
                 {msg.content ? (
-                  <pre className="whitespace-pre-wrap break-words font-sans text-stone-200 text-[13.5px] leading-relaxed m-0 select-text cursor-text">
+                  <pre className="operator-message-text whitespace-pre-wrap break-words font-sans m-0 select-text cursor-text">
                     {renderWithLinks(displayedText.current.get(msg.id) ?? msg.content)}
                     {msg.isStreaming && !activeTool && (
                       <span className="inline-block w-0.5 h-4 bg-brand-400 ml-0.5 align-middle animate-pulse" />
@@ -309,10 +401,10 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
                   </span>
                 ) : null}
                 {msg.isStreaming && activeTool && (
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-stone-800/80">
-                    <span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent animate-spin" />
-                    <span className="text-yellow-300 text-xs font-mono">{activeTool}</span>
-                    <span className="text-stone-500 text-xs">running</span>
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-operator-line">
+                    <span className="w-3 h-3 border-2 border-[var(--sw-accent)] border-t-transparent animate-spin" />
+                    <span className="operator-text-accent text-xs font-mono">{activeTool}</span>
+                    <span className="operator-text-subtle text-xs">running</span>
                   </div>
                 )}
                 {msg.content && (
@@ -355,9 +447,10 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
         <PermissionPrompt />
         <div ref={bottomRef} />
       </div>
+      )}
 
       {/* Input bar */}
-      <div className="operator-toolbar bg-operator-panel">
+      {!isDirectTestRun && <div className="operator-run-composer operator-toolbar bg-operator-panel">
         <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
@@ -379,7 +472,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
         <p className="text-stone-700 text-xs mt-1">
           The agent will receive your message and can respond or adjust its approach.
         </p>
-      </div>
+      </div>}
     </div>
   );
 }

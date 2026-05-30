@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { ArrowsClockwise } from "@phosphor-icons/react";
 import { useConfigStore } from "@renderer/store/config.store";
 import { useInstructionStore, type InstructionCard as ICard } from "@renderer/store/instruction.store";
+import { EmptyState } from "../common/Discoverability";
 
 interface TemplateEntry {
   templateName: string;
@@ -218,19 +219,19 @@ export default function TemplatePanel(): React.JSX.Element {
         key={key}
         className="operator-card operator-stack-sm"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="operator-label text-brand-400">
-              {tmpl.category === "@Workflows" ? "WF" : "MOD"}
+            <span className="operator-label operator-text-accent">
+              {tmpl.category === "@Workflows" ? "Workflow" : "Module"}
             </span>
-            <span className="text-stone-200 text-xs font-medium truncate">
+            <span className="operator-template-title truncate">
               {tmpl.templateName}
             </span>
           </div>
           {onDelete && (
             <button
               onClick={onDelete}
-              className="text-stone-600 hover:text-[var(--sw-danger)] text-xs flex-shrink-0 transition-colors"
+              className="operator-muted hover:text-[var(--sw-danger)] text-xs flex-shrink-0 transition-colors"
               title="Delete template"
             >
               Delete
@@ -238,7 +239,7 @@ export default function TemplatePanel(): React.JSX.Element {
           )}
         </div>
 
-        <p className="text-stone-500 text-xs truncate">
+        <p className="operator-template-meta truncate">
           {tmpl.moduleName}
           {tmpl.steps.length > 0 ? ` · ${tmpl.steps.length} step${tmpl.steps.length > 1 ? "s" : ""}` : ""}
           {urlPath ? ` · ${urlPath}` : ""}
@@ -254,11 +255,11 @@ export default function TemplatePanel(): React.JSX.Element {
           disabled={!isReady}
           className={`w-full text-center text-xs border px-2 py-2 transition-colors ${
             insertedId === tmpl.templateName
-              ? "text-brand-300 border-brand-700 bg-brand-950/20"
-              : "text-brand-400 hover:text-brand-300 disabled:text-stone-600 border-operator-line hover:border-brand-700 disabled:border-stone-800"
+              ? "border-[var(--sw-success)] bg-[color-mix(in_srgb,var(--sw-success)_14%,transparent)] text-[var(--sw-success)]"
+              : "operator-button-secondary disabled:opacity-50"
           }`}
         >
-          {insertedId === tmpl.templateName ? "Inserted" : "Insert"}
+          {insertedId === tmpl.templateName ? "Added to Create Tests" : "Use template"}
         </button>
       </div>
     );
@@ -267,9 +268,7 @@ export default function TemplatePanel(): React.JSX.Element {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="operator-toolbar-top flex items-center justify-between">
-        <p className="operator-tab border-[var(--sw-accent)] text-operator-ink px-0">
-          Templates
-        </p>
+        <span className="operator-tab operator-tab-standalone" data-active="true">Templates</span>
         {isReady && (
           <button
             onClick={() => setRefreshKey(k => k + 1)}
@@ -281,12 +280,15 @@ export default function TemplatePanel(): React.JSX.Element {
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3" data-tab-staging="true">
         {!isReady && (
-          <p className="operator-muted text-xs text-center py-4">
-            Select a project to load templates.
-          </p>
+          <EmptyState
+            title="Templates need a workspace"
+            description="Open or bootstrap a project first. Then project templates and your saved templates appear here."
+          />
         )}
+
+        {isReady && <p className="operator-panel-intro">Insert a reusable brief into Create Tests, then adjust the page, module, or expected behavior.</p>}
 
         {/* Project-specific templates from instructions.example.js — shown first */}
         {isReady && exampleTemplates.length > 0 && (
@@ -294,6 +296,7 @@ export default function TemplatePanel(): React.JSX.Element {
             <p className="operator-label flex items-center gap-1">
               Project Templates
             </p>
+            <p className="operator-section-help">Examples shipped with this workspace. Use these when the project already has preferred module names, URLs, or step patterns.</p>
             {exampleTemplates.map((tmpl, i) =>
               renderTemplateCard(tmpl, `example-${i}`)
             )}
@@ -306,11 +309,13 @@ export default function TemplatePanel(): React.JSX.Element {
             <p className="operator-label flex items-center gap-1">
               Custom Templates
             </p>
+            <p className="operator-section-help">Your saved briefs. Good for repeated flows like login, CRUD, checkout, or role-specific workflows.</p>
 
             {customTemplates.length === 0 && !showSaveInput && (
-              <p className="operator-muted text-xs py-2 text-center">
-                No custom templates yet.
-              </p>
+              <div className="operator-inline-panel text-center">
+                <p className="operator-text-subtle">No custom templates yet.</p>
+                <p className="operator-field-help">Build an instruction in Create Tests, then save it here when it becomes reusable.</p>
+              </div>
             )}
 
             {customTemplates.map((tmpl, i) =>
@@ -364,6 +369,7 @@ export default function TemplatePanel(): React.JSX.Element {
             <p className="operator-label flex items-center gap-1">
               Quick Start
             </p>
+            <p className="operator-section-help">Generic starting points for a blank project. Insert one, then adjust URL, module name, and expected behavior.</p>
             {builtInTemplates.map((tmpl, i) =>
               renderTemplateCard(tmpl, `builtin-${i}`)
             )}

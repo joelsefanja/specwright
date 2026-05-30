@@ -1,6 +1,22 @@
 import React, { useState, useCallback } from "react";
 import { useConfigStore } from "@renderer/store/config.store";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
+import { ContextHeader, GuidanceRail } from "../common/Discoverability";
+
+const HEALER_GUIDE = [
+  {
+    label: "Scope the repair",
+    description: "Add files when the failure is known, or leave empty for project-wide diagnosis.",
+  },
+  {
+    label: "Run and inspect",
+    description: "The healer runs tests, reads output, and identifies selector, timeout, data, or assertion failures.",
+  },
+  {
+    label: "Patch and retry",
+    description: "It updates step definitions and retries up to 3 times before reporting what remains.",
+  },
+];
 
 export default function HealerPanel(): React.JSX.Element {
   const { projectPath } = useConfigStore();
@@ -67,15 +83,23 @@ export default function HealerPanel(): React.JSX.Element {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Content — scrollable */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-4 bg-operator-canvas">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-4 bg-operator-canvas" data-tab-staging="true">
+        <ContextHeader
+          eyebrow="Repair Tests"
+          title="Repair failing tests with project context"
+          description="Select specific files when you know what failed, or leave the target empty to let Specwright inspect the project failures."
+        />
+        <GuidanceRail
+          title="Focused repair loop"
+          description="Use this after tests exist and a run fails. For new coverage, go back to Create Tests and generate from an instruction."
+          items={HEALER_GUIDE}
+        />
         {/* Files to heal */}
         <div>
-          <label className="text-stone-300 text-[13.5px] font-semibold mb-2 block">
+          <label className="operator-control-label">
             Files to Heal
           </label>
-          <p className="operator-muted text-xs mb-3">
-            Select test files or directories with failing tests. Leave empty to heal all failures.
-          </p>
+          <p className="operator-field-help mb-3">Select test files or directories with failing tests. Leave empty to heal all failures.</p>
 
           {/* Path chips */}
           {paths.length > 0 && (
@@ -116,9 +140,10 @@ export default function HealerPanel(): React.JSX.Element {
 
         {/* Instructions */}
         <div>
-          <label className="text-stone-300 text-[13.5px] font-semibold mb-2 block">
+          <label className="operator-control-label">
             Instructions <span className="operator-muted font-normal">(optional)</span>
           </label>
+          <p className="operator-field-help mb-2">Add symptoms the terminal showed, recent UI changes, or constraints the healer should respect.</p>
           <textarea
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
@@ -129,13 +154,6 @@ export default function HealerPanel(): React.JSX.Element {
           />
         </div>
 
-        {/* Info */}
-        <div className="operator-panel border px-4 py-3">
-          <p className="text-stone-400 text-xs leading-relaxed">
-            The healer agent will run the tests, diagnose failures (selector, timeout, assertion, data issues),
-            and auto-fix step definitions. It loops up to 3 times until tests pass.
-          </p>
-        </div>
       </div>
 
       {/* Toolbar */}

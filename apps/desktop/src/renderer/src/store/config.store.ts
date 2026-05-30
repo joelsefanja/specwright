@@ -26,6 +26,7 @@ interface ConfigState {
   loaded: boolean;
   skipPermissions: boolean;
   activeTab: ActiveTab;
+  recentProjects: string[];
   /** Plugin selected before project creation. null = use default @specwright/plugin. */
   pendingPlugin: PluginSource | null;
 
@@ -34,6 +35,7 @@ interface ConfigState {
   /** Two-step alternative: caller already has a folder; we only need to run bootstrap. */
   bootstrapAt: (folderPath: string, authStrategy?: "email-password" | "oauth" | "none") => Promise<void>;
   loadExistingProject: (folderPath: string) => Promise<void>;
+  addRecentProject: (folderPath: string) => void;
   setEnvVar: (key: string, value: string) => void;
   removeEnvVar: (key: string) => void;
   saveEnv: () => Promise<void>;
@@ -45,6 +47,20 @@ interface ConfigState {
 }
 
 const DEFAULT_ENV: EnvVars = { BASE_URL: "", TEST_ENV: "qat" };
+const RECENT_PROJECTS_KEY = "specwright.recentProjects";
+
+function readRecentProjects(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_PROJECTS_KEY);
+    return raw ? JSON.parse(raw) as string[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentProjects(projects: string[]): void {
+  window.localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(projects.slice(0, 6)));
+}
 
 export const useConfigStore = create<ConfigState>((set, get) => ({
   projectPath: "",
@@ -54,9 +70,11 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   loaded: false,
   skipPermissions: true,
   activeTab: "explorer",
+  recentProjects: [],
   pendingPlugin: null,
 
   hydrate: async () => {
+    set({ recentProjects: readRecentProjects() });
     const projectPath = await window.specwright.project.getPath();
     if (!projectPath) {
       set({ loaded: true, projectState: "none" });
@@ -108,6 +126,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         /* env file missing or unreadable — project still ready, use defaults */
       }
       set({ projectState: "ready", envVars, pendingPlugin: null });
+      get().addRecentProject(folder);
     } else {
       set({ projectState: "error" });
     }
@@ -124,6 +143,14 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     }
     const envVars = await window.specwright.project.readEnv(folderPath);
     set({ projectPath: folderPath, projectState: "ready", envVars });
+    get().addRecentProject(folderPath);
+  },
+
+  addRecentProject: (folderPath) => {
+    if (!folderPath || folderPath.includes("specwright-run-tests-")) return;
+    const next = [folderPath, ...get().recentProjects.filter((project) => project !== folderPath)].slice(0, 6);
+    writeRecentProjects(next);
+    set({ recentProjects: next });
   },
 
   setEnvVar: (key, value) => {

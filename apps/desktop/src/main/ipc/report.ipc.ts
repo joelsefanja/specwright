@@ -83,4 +83,54 @@ export function registerReportIpc(): void {
 
     await shell.openPath(htmlReport);
   });
+
+  ipcMain.handle('report:start-test-report', async (_event, projectPath: string) => {
+    killReportServer();
+
+    const pm = detectPackageManager(projectPath);
+    const command = pm === 'npm' ? ['run', 'test:report'] : ['run', 'test:report'];
+
+    return await new Promise<{ url: string }>((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('Report server did not print a local URL within 20 seconds.'));
+        }
+      }, 20000);
+
+      reportServerProcess = spawn(pm, command, {
+        cwd: projectPath,
+        detached: false,
+        shell: process.platform === 'win32',
+      });
+
+      const handleOutput = (chunk: Buffer): void => {
+        const text = chunk.toString();
+        const url = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1):\d+[^\s]*/)?.[0];
+        if (!url || settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve({ url });
+      };
+
+      reportServerProcess.stdout?.on('data', handleOutput);
+      reportServerProcess.stderr?.on('data', handleOutput);
+      reportServerProcess.on('error', (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
+      reportServerProcess.on('exit', (code) => {
+        reportServerProcess = null;
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(new Error(`test:report exited before a report URL was available (exit ${code ?? 'unknown'}).`));
+        }
+      });
+    });
+  });
 }

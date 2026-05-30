@@ -1,16 +1,84 @@
 import React, { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import "@xterm/xterm/css/xterm.css";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
+import { collapsePresenceVariants, presenceTransition } from "@renderer/motion/presets";
 
 export default function TerminalPanel(): React.JSX.Element {
   const { logLines, status, errorMessage } = usePipelineStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const terminalElRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<any>(null);
+  const fitRef = useRef<any>(null);
+  const writtenLinesRef = useRef(0);
   const [minimized, setMinimized] = useState(false);
+  const [terminalReady, setTerminalReady] = useState(false);
+  const [terminalFailed, setTerminalFailed] = useState(false);
 
   useEffect(() => {
-    if (!minimized) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!terminalElRef.current || terminalRef.current) return;
+    let disposed = false;
+    void Promise.all([
+      import("@xterm/xterm"),
+      import("@xterm/addon-fit"),
+      import("@xterm/addon-web-links"),
+      import("@xterm/addon-search"),
+    ])
+      .then(([xterm, fitAddon, webLinksAddon, searchAddon]) => {
+        if (disposed || !terminalElRef.current) return;
+        const term = new xterm.Terminal({
+          convertEol: true,
+          cursorBlink: false,
+        fontSize: 11,
+        scrollback: 5000,
+        disableStdin: true,
+          theme: {
+            background: "#0b0d10",
+            foreground: "#dbe4ee",
+            cursor: "#f2d47b",
+            selectionBackground: "#26303b",
+          },
+        });
+        const fit = new fitAddon.FitAddon();
+        const webLinks = new webLinksAddon.WebLinksAddon();
+        const search = new searchAddon.SearchAddon();
+        term.loadAddon(fit);
+        term.loadAddon(webLinks);
+        term.loadAddon(search);
+        term.open(terminalElRef.current);
+        fit.fit();
+        for (const line of logLines) term.writeln(line);
+        writtenLinesRef.current = logLines.length;
+        terminalRef.current = term;
+        fitRef.current = fit;
+        setTerminalReady(true);
+        setTimeout(() => {
+          fit.fit();
+          term.scrollToBottom();
+        }, 0);
+      })
+      .catch(() => setTerminalFailed(true));
+    return () => {
+      disposed = true;
+      terminalRef.current?.dispose();
+      terminalRef.current = null;
+      fitRef.current = null;
+    };
+  }, [logLines]);
+
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+    for (const line of logLines.slice(writtenLinesRef.current)) {
+      term.writeln(line);
     }
-  }, [logLines.length, minimized]);
+    writtenLinesRef.current = logLines.length;
+    if (!minimized) term.scrollToBottom();
+  }, [logLines, minimized]);
+
+  useEffect(() => {
+    if (!minimized) setTimeout(() => fitRef.current?.fit(), 0);
+  }, [minimized]);
 
   // Auto-expand when pipeline starts running
   useEffect(() => {
@@ -18,30 +86,41 @@ export default function TerminalPanel(): React.JSX.Element {
   }, [status]);
 
   return (
-    <div className={`flex flex-col overflow-hidden transition-all duration-200 ${minimized ? "h-9" : "h-full"}`}>
+    <div className={`flex flex-col overflow-hidden transition-[height] duration-200 ${minimized ? "h-9" : "h-full"}`}>
       {/* Header — always visible, clickable to toggle */}
       <div
-        className="flex items-center justify-between px-3 py-2 border-b border-operator-line flex-shrink-0 cursor-pointer hover:bg-stone-900 select-none"
+      className="operator-terminal-head"
         onClick={() => setMinimized(!minimized)}
       >
-        <span className="operator-label">
-          Terminal
+        <span className="min-w-0">
+          <span className="operator-label block">Run output</span>
+          {!minimized && (
+            <span className="operator-terminal-subtitle">
+              {status === "running"
+                ? "Live command stream, tool output, and heartbeat messages."
+                : status === "error"
+                  ? "Use the last failing command and error lines to decide whether to heal or rerun."
+                  : logLines.length > 0
+                    ? "Most recent command output is kept here for inspection."
+                    : "Waiting for generation or test execution to start."}
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1">
             <span
               className={`w-2 h-2 ${
-                status === "running" ? "bg-green-400 animate-pulse" :
+                status === "running" ? "bg-[var(--sw-accent)] animate-pulse" :
                 status === "error"   ? "bg-[var(--sw-danger)]" :
-                status === "done"    ? "bg-green-600" :
-                "bg-stone-700"
+                status === "done"    ? "bg-[var(--sw-success)]" :
+                "bg-[var(--sw-text-subtle)]"
               }`}
             />
-            <span className="text-stone-600 text-xs capitalize">{status}</span>
+            <span className="operator-terminal-state">{status === "running" ? "Running" : status}</span>
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); setMinimized(!minimized); }}
-            className="text-stone-500 hover:text-stone-300 text-xs transition-colors w-5 h-5 flex items-center justify-center hover:bg-stone-800"
+            className="operator-terminal-toggle"
             title={minimized ? "Expand terminal" : "Minimize terminal"}
           >
             {minimized ? "▲" : "▼"}
@@ -50,42 +129,33 @@ export default function TerminalPanel(): React.JSX.Element {
       </div>
 
       {/* Log lines — hidden when minimized */}
+      <AnimatePresence initial={false}>
       {!minimized && (
-        <>
-          <div className="flex-1 min-h-0 overflow-y-auto scrollable px-3 py-2">
+        <motion.div className="flex-1 min-h-0 overflow-hidden px-3 py-2" variants={collapsePresenceVariants} initial="initial" animate="animate" exit="exit" transition={presenceTransition}>
             {logLines.length === 0 && status === "idle" && (
-              <p className="text-stone-700 text-xs terminal">Waiting for pipeline to start.</p>
+              <p className="operator-text-subtle terminal">Waiting for pipeline to start.</p>
             )}
-
-            <div className="terminal text-stone-300 space-y-0.5">
-              {logLines.map((line, i) => (
-                <div key={i} className="leading-relaxed">
-                  <span className="text-stone-700 mr-2 select-none flex-shrink-0">{String(i + 1).padStart(3, " ")}</span>
-                  <span className={`select-text cursor-text ` +
-                    (line.startsWith("[tool]")        ? "text-yellow-400" :
-                    line.startsWith("[pipeline]")    ? "text-stone-300" :
-                    line.startsWith("[mcp]")         ? "text-brand-300" :
-                    line.startsWith("[permission]")  ? "text-amber-400" :
-                    line.startsWith("[user]")        ? "text-brand-400" :
-                    line.startsWith("[claude")       ? "text-stone-500" :
-                    (line.includes("error") || line.includes("Error") || line.includes("ERROR")) ? "operator-danger" :
-                    line.includes("Done")            ? "text-green-400" :
-                    "text-stone-300")
-                  }>
-                    {line}
-                  </span>
-                </div>
-              ))}
-
-              {status === "error" && errorMessage && (
-                <div className="operator-danger mt-1">Error: {errorMessage}</div>
-              )}
-            </div>
+            <div ref={terminalElRef} className={`h-full min-h-0 ${terminalReady && !terminalFailed && logLines.length > 0 ? "" : "hidden"}`} />
+            {(!terminalReady || terminalFailed || logLines.length === 0) && (
+              <div className="terminal operator-terminal-fallback space-y-0.5 overflow-y-auto scrollable h-full">
+                {logLines.length === 0 ? (
+                  <p className="operator-text-subtle terminal">
+                    {status === "running" ? "Starting test command..." : "No command output yet."}
+                  </p>
+                ) : logLines.map((line, i) => (
+                    <div key={i} className="leading-relaxed">
+                      <span className="operator-terminal-line-number mr-2 select-none">{String(i + 1).padStart(3, " ")}</span>
+                      <span className="select-text cursor-text">{line}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+            {status === "error" && errorMessage && <p className="operator-danger mt-1">Error: {errorMessage}</p>}
 
             <div ref={bottomRef} />
-          </div>
-        </>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

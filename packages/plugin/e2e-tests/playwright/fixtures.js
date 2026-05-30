@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { chromium } from '@playwright/test';
 
 // Raw V8 coverage accumulator — each scenario writes one JSON file here.
 // globalTeardown reads all of them and runs monocart-coverage-reports
@@ -197,8 +198,61 @@ export function scopedTestDataExists(scope) {
 let _featurePage = null;
 let _featureContext = null;
 let _lastTestFile = null;
+let _cdpBrowser = null;
+let _cdpContext = null;
+let _cdpPage = null;
 
 const REUSABLE_PROJECTS = ['serial-execution'];
+
+const isIntegratedBrowserMode = () => process.env.SPECWRIGHT_BROWSER_MODE === 'cdp' && !!process.env.SPECWRIGHT_CDP_ENDPOINT;
+
+async function applyStorageStateToContext(context, storageState) {
+  if (!storageState || typeof storageState !== 'string' || !fs.existsSync(storageState)) return;
+  const raw = JSON.parse(fs.readFileSync(storageState, 'utf8'));
+  const { cookies = [], origins = [] } = raw || {};
+
+  if (Array.isArray(cookies) && cookies.length) {
+    await context.addCookies(cookies).catch((err) => console.log('[CDP] addCookies failed:', err.message || err));
+  }
+
+  for (const origin of Array.isArray(origins) ? origins : []) {
+    const storage = Array.isArray(origin.localStorage) ? origin.localStorage : [];
+    if (!origin.origin || !storage.length) continue;
+    await context.addInitScript(
+      ({ targetOrigin, storage }) => {
+        if (window.location.origin !== targetOrigin) return;
+        for (const item of storage) localStorage.setItem(item.name, item.value);
+      },
+      { targetOrigin: origin.origin, storage },
+    ).catch((err) => console.log('[CDP] addInitScript failed:', err.message || err));
+  }
+}
+
+async function getIntegratedBrowserPage(contextOptions) {
+  const endpoint = process.env.SPECWRIGHT_CDP_ENDPOINT;
+  const targetUrl = process.env.SPECWRIGHT_CDP_TARGET_URL || process.env.BASE_URL || '';
+  const deadline = Date.now() + 20000;
+
+  if (!_cdpBrowser) {
+    _cdpBrowser = await chromium.connectOverCDP(endpoint, { timeout: 15000 });
+    _cdpContext = _cdpBrowser.contexts()[0];
+    if (!_cdpContext) throw new Error(`[CDP] No browser context found at ${endpoint}`);
+    await applyStorageStateToContext(_cdpContext, contextOptions.storageState);
+    console.log(`[CDP] Connected to Desktop integrated browser: ${endpoint}`);
+  }
+
+  while (Date.now() < deadline) {
+    const pages = _cdpContext.pages().filter((page) => !page.isClosed());
+    _cdpPage = pages.find((page) => targetUrl && page.url().startsWith(targetUrl))
+      ?? pages.find((page) => !page.url().startsWith('devtools://') && !page.url().startsWith('chrome://'))
+      ?? null;
+    if (_cdpPage) return _cdpPage;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  const urls = _cdpContext.pages().map((page) => page.url()).join(', ');
+  throw new Error(`[CDP] Could not find Desktop integrated browser target${targetUrl ? ` for ${targetUrl}` : ''}. Open targets: ${urls || '(none)'}`);
+}
 
 // Extend base test with custom fixtures
 export const test = base.extend({
@@ -242,6 +296,12 @@ export const test = base.extend({
       ignoreHTTPSErrors,
       ...(video && video !== 'off' ? { recordVideo: { dir: testInfo.outputDir } } : {}),
     };
+
+    if (isIntegratedBrowserMode()) {
+      const page = await getIntegratedBrowserPage(contextOptions);
+      await use(page);
+      return;
+    }
 
     // Coverage collection — V8 native, Chromium only, build-tool agnostic.
     // Skipped for @serial-execution projects (browser reuse breaks per-scenario start/stop).

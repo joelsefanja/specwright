@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 interface ModelOption {
   providerId: string;
@@ -15,10 +15,28 @@ function sortModels(models: ModelOption[]): ModelOption[] {
     const aPreferred = isPreferredGptProvider(a.providerId) ? 0 : 1;
     const bPreferred = isPreferredGptProvider(b.providerId) ? 0 : 1;
     if (aPreferred !== bPreferred) return aPreferred - bPreferred;
-    if (a.modelId === "gpt-5.5") return -1;
-    if (b.modelId === "gpt-5.5") return 1;
+    if (a.modelId === "gpt-5.5-fast") return -1;
+    if (b.modelId === "gpt-5.5-fast") return 1;
     return a.modelId.localeCompare(b.modelId);
   });
+}
+
+function isAllowedModel(model: ModelOption): boolean {
+  return model.modelId !== "big-pickle";
+}
+
+function normalizeModel(model: string): string {
+  return !model || model === "big-pickle" || model === "gpt-5.5" ? "gpt-5.5-fast" : model;
+}
+
+function groupModels(models: ModelOption[]): Map<string, ModelOption[]> {
+  const groups = new Map<string, ModelOption[]>();
+  for (const model of models) {
+    const items = groups.get(model.providerId) ?? [];
+    items.push(model);
+    groups.set(model.providerId, items);
+  }
+  return groups;
 }
 
 export function OpenCodeConfigModal({
@@ -35,10 +53,11 @@ export function OpenCodeConfigModal({
   onClose: () => void;
 }): React.JSX.Element {
   const [url, setUrl] = useState(initialUrl || "http://127.0.0.1:18789");
-  const [selectedModel, setSelectedModel] = useState(initialModel || "");
+  const [selectedModel, setSelectedModel] = useState(normalizeModel(initialModel));
   const [variant, setVariant] = useState(initialVariant || "low");
   const [status, setStatus] = useState<"idle" | "detecting" | "connected" | "error">("idle");
   const [models, setModels] = useState<ModelOption[]>([]);
+  const [modelSearch, setModelSearch] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   const handleDetect = async (): Promise<void> => {
@@ -49,7 +68,9 @@ export function OpenCodeConfigModal({
       const data = await window.specwright.opencode.listProviders(url);
       if (!data) {
         setStatus("error");
-        setMessage("Server not reachable — run: opencode serve --port 18789");
+        setMessage("Could not refresh models. Using the default OpenCode model.");
+        setModels([{ providerId: "openai", modelId: "gpt-5.5-fast" }]);
+        setSelectedModel("gpt-5.5-fast");
         return;
       }
       const optsByKey = new Map<string, ModelOption>();
@@ -65,29 +86,46 @@ export function OpenCodeConfigModal({
         }
       }
       if (data.connected.includes("opencode")) {
-        optsByKey.set("opencode/gpt-5.5", { providerId: "opencode", modelId: "gpt-5.5" });
+        optsByKey.set("openai/gpt-5.5-fast", { providerId: "openai", modelId: "gpt-5.5-fast" });
       }
-      const opts = sortModels(Array.from(optsByKey.values()));
+      const opts = sortModels(Array.from(optsByKey.values()).filter(isAllowedModel));
       if (opts.length === 0) {
-        setStatus("error");
-        setMessage("No connected providers found");
+        setStatus("connected");
+        setMessage("Using the default OpenCode model.");
+        setModels([{ providerId: "openai", modelId: "gpt-5.5-fast" }]);
+        setSelectedModel("gpt-5.5-fast");
         return;
       }
       setModels(opts);
       if (!selectedModel || !opts.some((m) => m.modelId === selectedModel)) {
-        setSelectedModel(opts.find((m) => m.modelId === "gpt-5.5")?.modelId ?? opts[0].modelId);
+        setSelectedModel(opts.find((m) => m.modelId === "gpt-5.5-fast")?.modelId ?? opts[0].modelId);
       }
       setStatus("connected");
     } catch {
       setStatus("error");
-      setMessage("Server not reachable");
+      setMessage("Could not refresh models. Using the default OpenCode model.");
+      setModels([{ providerId: "openai", modelId: "gpt-5.5-fast" }]);
+      setSelectedModel("gpt-5.5-fast");
     }
   };
+
+  useEffect(() => {
+    void handleDetect();
+  }, []);
 
   const label = (pid: string): string => {
     const names: Record<string, string> = { opencode: "OpenCode", anthropic: "Anthropic", openai: "OpenAI", ollama: "Ollama" };
     return names[pid] || pid;
   };
+
+  const filteredModels = useMemo(() => {
+    const query = modelSearch.trim().toLowerCase();
+    if (!query) return models;
+    return models.filter((model) =>
+      model.modelId.toLowerCase().includes(query) || model.providerId.toLowerCase().includes(query)
+    );
+  }, [models, modelSearch]);
+  const groupedModels = groupModels(filteredModels);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -96,69 +134,61 @@ export function OpenCodeConfigModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-operator-line">
-          <h2 className="text-stone-200 text-sm font-semibold">OpenCode Model</h2>
+          <h2 className="text-stone-200 text-sm font-semibold">OpenCode model</h2>
           <button onClick={onClose} className="operator-muted hover:text-stone-300 text-xs">Close</button>
         </div>
 
         <div className="px-4 py-3 space-y-4">
-          <div>
-            <label className="operator-control-label">Server URL</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="http://127.0.0.1:18789"
-                className="operator-field flex-1 px-2 py-2"
-              />
-              <button
-                onClick={handleDetect}
-                disabled={status === "detecting"}
-                className="operator-button disabled:opacity-50"
-              >
-                {status === "detecting" ? "..." : "Detect"}
+          <div className="space-y-2">
+            <label className="operator-control-label">Model</label>
+            <input
+              type="search"
+              value={modelSearch}
+              onChange={(event) => setModelSearch(event.target.value)}
+              placeholder="Search models..."
+              className="operator-field w-full px-2 py-2"
+            />
+            <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} className="operator-select w-full">
+              {filteredModels.length === 0 ? (
+                <option value={selectedModel}>{selectedModel || "No matching models"}</option>
+              ) : (
+                Array.from(groupedModels.entries()).map(([providerId, options]) => (
+                  <optgroup key={providerId} label={label(providerId)}>
+                    {options.map((model) => (
+                      <option key={`${model.providerId}-${model.modelId}`} value={model.modelId}>{model.modelId}</option>
+                    ))}
+                  </optgroup>
+                ))
+              )}
+            </select>
+            <div className="flex items-center justify-between gap-2">
+              <p className="operator-field-help">
+                {status === "detecting" ? "Refreshing available models..." : message ?? "Default: gpt-5.5-fast"}
+              </p>
+              <button type="button" onClick={handleDetect} disabled={status === "detecting"} className="operator-button-quiet px-2 py-1 disabled:opacity-50">
+                Refresh
               </button>
             </div>
           </div>
 
-          {status === "error" && message && (
-            <p className="operator-danger text-xs">{message}</p>
-          )}
-
-          {models.length > 0 && (
-            <div className="space-y-2">
-              <p className="operator-section-title">Models</p>
-              {models.map((m) => (
-                <label
-                  key={m.providerId}
-                  className={`flex items-center gap-3 px-3 py-2 border cursor-pointer transition-colors ${
-                    selectedModel === m.modelId
-                      ? "bg-brand-950/30 border-brand-500"
-                      : "bg-operator-field border-operator-line hover:border-stone-500"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="oc-model"
-                    checked={selectedModel === m.modelId}
-                    onChange={() => setSelectedModel(m.modelId)}
-                    className="w-3.5 h-3.5 text-brand-500 bg-operator-field border-operator-line"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-stone-200 text-[13px] font-medium">{label(m.providerId)}</p>
-                    <p className="operator-muted text-xs font-mono truncate">{m.modelId}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-
           {status === "connected" && selectedModel && (
             <p className="text-[var(--sw-success)] text-xs flex items-center gap-1">
               <span className="operator-status-dot bg-[var(--sw-success)]" />
-              Connected — {selectedModel} / {variant}
+              Selected: {selectedModel} / {variant}
             </p>
           )}
+
+          <details className="operator-inline-panel">
+            <summary className="operator-control-label cursor-pointer">Connection</summary>
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://127.0.0.1:18789"
+              className="operator-field mt-2 w-full px-2 py-2"
+            />
+            <p className="operator-field-help">Specwright manages this local OpenCode endpoint automatically.</p>
+          </details>
 
           <div>
             <label className="operator-control-label">Variant</label>
@@ -184,7 +214,7 @@ export function OpenCodeConfigModal({
             Cancel
           </button>
           <button
-            onClick={() => onSave(url, selectedModel, variant)}
+        onClick={() => onSave(url, normalizeModel(selectedModel), variant)}
             disabled={!selectedModel}
             className="operator-button-primary disabled:opacity-40"
           >

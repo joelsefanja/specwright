@@ -1,15 +1,22 @@
-import React, { useEffect, useState } from "react";
-import { GearSix, Pause, Play, Trash } from "@phosphor-icons/react";
+import React, { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { GearSix, Trash } from "@phosphor-icons/react";
 import { useConfigStore } from "@renderer/store/config.store";
 import { AuthSettingsModal, EMPTY_AUTH, isOAuthConfigured, isEmailPasswordConfigured } from "./AuthSettingsModal";
 import type { AuthFields } from "./AuthSettingsModal";
 import { PluginPickerModal } from "./PluginPickerModal";
 import { OpenCodeConfigModal } from "./OpenCodeConfigModal";
+import { ReadinessChecklist } from "../common/Discoverability";
+import { presenceTransition, presenceVariants } from "@renderer/motion/presets";
 
 const ENVS = ["qat", "dev", "staging", "prod", "local"];
 const OPENCODE_DEFAULT_URL = "http://127.0.0.1:18789";
-const OPENCODE_DEFAULT_MODEL = "gpt-5.5";
+const OPENCODE_DEFAULT_MODEL = "gpt-5.5-fast";
 const OPENCODE_DEFAULT_VARIANT = "low";
+
+function normalizeOpenCodeModel(model?: string | null): string {
+  return !model || model === "big-pickle" ? OPENCODE_DEFAULT_MODEL : model;
+}
 
 // Strip @scope/ prefix for display — full name kept in title tooltip
 function shortName(name: string): string {
@@ -74,11 +81,20 @@ function ThemeSelect({
   );
 }
 
+function SidebarHeading({ title, description }: { title: string; description?: string }): React.JSX.Element {
+  return (
+    <div className="operator-sidebar-heading">
+      <p className="operator-section-title">{title}</p>
+      {description && <p>{description}</p>}
+    </div>
+  );
+}
+
 export default function ConfigPanel(): React.JSX.Element {
   const {
     projectPath, projectState, envVars, loaded,
     pickAndBootstrap, loadExistingProject, setEnvVar, removeEnvVar, saveEnv,
-    skipPermissions, setSkipPermissions, pendingPlugin, setPendingPlugin, resetProject,
+    skipPermissions, setSkipPermissions, pendingPlugin, setPendingPlugin, resetProject, recentProjects,
   } = useConfigStore();
 
   const [customVarKey, setCustomVarKey] = useState("");
@@ -95,12 +111,15 @@ export default function ConfigPanel(): React.JSX.Element {
   const [verifyStatus, setVerifyStatus] = useState<"idle" | "verifying" | "ok" | "error">("idle");
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
   const [showOcModal, setShowOcModal] = useState(false);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [ocStatus, setOcStatus] = useState<"idle" | "checking" | "connected" | "error">("idle");
   const [ocModel, setOcModel] = useState<string | null>(null);
   const [ocServerRunning, setOcServerRunning] = useState(false);
   const [ocStarting, setOcStarting] = useState(false);
   const [authStrategies, setAuthStrategies] = useState<string[]>(["oauth", "email-password"]);
-  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const appUrlInputRef = useRef<HTMLInputElement>(null);
+  const aiSectionRef = useRef<HTMLDivElement>(null);
+  const opencodeAutoStartRef = useRef(false);
 
 
   useEffect(() => {
@@ -118,14 +137,14 @@ export default function ConfigPanel(): React.JSX.Element {
   const authRequired = authStrategy !== "none";
   const usesBuiltInAuthSettings = authStrategy === "oauth" || authStrategy === "email-password";
   const ocStatusLabel = ocStarting
-    ? "Starting..."
+    ? "Preparing..."
     : ocStatus === "connected"
       ? "Connected"
       : ocStatus === "checking"
         ? "Checking..."
         : ocStatus === "error"
           ? "Not reachable"
-          : ocServerRunning ? "Running" : "Stopped";
+          : ocServerRunning ? "Connected" : "Preparing";
   const preferredAuthStrategy = (strategies: string[]): string =>
     strategies.find((strategy) => strategy.toLowerCase() === "backoffice")
     ?? strategies.find((strategy) => strategy !== "none")
@@ -144,16 +163,22 @@ export default function ConfigPanel(): React.JSX.Element {
         return;
       }
       const detected = await window.specwright.opencode.detectModel(getOpenCodeUrl());
-      if (detected) {
-        setOcModel(detected.modelId);
-        setEnvVar("SPECWRIGHT_MODEL", detected.modelId);
-        saveEnv();
-      }
+      const model = normalizeOpenCodeModel(detected?.modelId);
+      setOcModel(model);
+      setEnvVar("SPECWRIGHT_MODEL", model);
+      saveEnv();
       setOcStatus("connected");
     } finally {
       setOcStarting(false);
     }
   };
+
+  useEffect(() => {
+    if ((envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode") return;
+    if (ocServerRunning || ocStarting || opencodeAutoStartRef.current) return;
+    opencodeAutoStartRef.current = true;
+    void startAndDetectOpenCode();
+  }, [envVars.SPECWRIGHT_LLM_PROVIDER, ocServerRunning, ocStarting]);
 
   useEffect(() => {
     if (!projectPath || !loaded) return;
@@ -255,6 +280,7 @@ export default function ConfigPanel(): React.JSX.Element {
   };
 
   const basename = (p: string): string => p.replace(/\\/g, "/").split("/").pop() ?? p;
+  const projectOptions = recentProjects.filter((project) => project !== projectPath).slice(0, 5);
 
   const handleAddCustomVar = (): void => {
     const key = customVarKey.trim().toUpperCase().replace(/\s+/g, "_");
@@ -280,6 +306,49 @@ export default function ConfigPanel(): React.JSX.Element {
 
   const customVars = Object.entries(envVars).filter(([k]) => !managedKeys.has(k));
   const isReady = projectState === "ready";
+  const appUrlConfigured = Boolean((envVars.BASE_URL as string | undefined)?.trim());
+  const loginConfigured = !authRequired || isConfigured;
+  const aiConfigured = Boolean((envVars.SPECWRIGHT_MODEL as string | undefined)?.trim()) || (envVars.SPECWRIGHT_LLM_PROVIDER as string) === "opencode";
+  const focusAppUrl = (): void => appUrlInputRef.current?.focus();
+  const openLoginSettings = (): void => {
+    if (!authRequired) handleAuthToggle(true);
+    else if (usesBuiltInAuthSettings) setShowAuthModal(true);
+  };
+  const focusAiModel = (): void => {
+    aiSectionRef.current?.scrollIntoView({ block: "nearest" });
+    if ((envVars.SPECWRIGHT_LLM_PROVIDER as string) === "opencode") setShowOcModal(true);
+  };
+  const setupSteps = [
+    {
+      label: "Project folder",
+      description: isReady ? `Tests will be created in ${basename(projectPath || "")}.` : "Open the repository where Specwright should create tests.",
+      complete: isReady,
+      actionLabel: "Open",
+      onAction: isReady ? undefined : pickAndBootstrap,
+    },
+    {
+      label: "Website URL",
+      description: appUrlConfigured ? "Browser exploration has a starting address." : "Tell Specwright where the app runs, for example http://localhost:5173.",
+      complete: appUrlConfigured,
+      actionLabel: "Add URL",
+      onAction: isReady ? focusAppUrl : undefined,
+    },
+    {
+      label: "Login choice",
+      description: loginConfigured ? "Specwright knows whether to sign in before testing." : "Add credentials, choose a login script, or turn login off.",
+      complete: loginConfigured,
+      actionLabel: authRequired ? "Configure" : "Choose",
+      onAction: isReady ? openLoginSettings : undefined,
+    },
+    {
+      label: "AI model",
+      description: aiConfigured ? "Specwright has a model for writing tests." : "Choose the model that writes the feature and step files.",
+      complete: aiConfigured,
+      actionLabel: "Choose model",
+      onAction: isReady ? focusAiModel : undefined,
+    },
+  ];
+  const hasMissingSetup = setupSteps.some((step) => !step.complete);
 
   return (
     <>
@@ -301,79 +370,122 @@ export default function ConfigPanel(): React.JSX.Element {
       {showOcModal && (
         <OpenCodeConfigModal
           initialUrl={getOpenCodeUrl()}
-          initialModel={(envVars.SPECWRIGHT_MODEL as string) || ""}
+          initialModel={normalizeOpenCodeModel(envVars.SPECWRIGHT_MODEL as string)}
           initialVariant={(envVars.SPECWRIGHT_OPENCODE_VARIANT as string) || OPENCODE_DEFAULT_VARIANT}
           onSave={(url, model, variant) => {
             setEnvVar("SPECWRIGHT_OPENCODE_URL", url);
-            setEnvVar("SPECWRIGHT_MODEL", model);
+            setEnvVar("SPECWRIGHT_MODEL", normalizeOpenCodeModel(model));
             setEnvVar("SPECWRIGHT_OPENCODE_VARIANT", variant);
             saveEnv();
             setOcStatus("connected");
-            setOcModel(model);
+            setOcModel(normalizeOpenCodeModel(model));
             setShowOcModal(false);
           }}
           onClose={() => setShowOcModal(false)}
         />
       )}
 
-      <div className="flex flex-col h-full overflow-y-auto scrollable bg-operator-panel" style={{ padding: "0 var(--sw-panel-pad) var(--sw-panel-pad)", gap: "var(--sw-space-3)" }}>
+      <div className="flex flex-col h-full overflow-y-auto scrollable bg-operator-panel" data-tab-staging="true" style={{ padding: "0 var(--sw-panel-pad) var(--sw-panel-pad)", gap: "var(--sw-space-3)" }}>
 
-        <div className="operator-panel-brand">
-          <div className="flex items-baseline justify-between">
-            <h1 className="text-stone-100 font-semibold text-base tracking-[0.08em] uppercase">Specwright</h1>
-            <div className="flex items-center gap-2">
-              {appVersion && (
-                <span className="operator-muted text-xs font-mono">v{appVersion}</span>
-              )}
-              {updateVersion && (
-                <button
-                  onClick={() => window.specwright.app.installUpdate()}
-                  title={`v${updateVersion} available — click to download`}
-                  className="flex items-center gap-1 text-[var(--sw-accent)] hover:text-[var(--sw-accent-strong)] text-xs transition-colors"
-                >
-                  <svg width="7" height="7" viewBox="0 0 7 7" fill="currentColor" className="shrink-0">
-                    <circle cx="3.5" cy="3.5" r="3.5" />
-                  </svg>
-                  Update
-                </button>
-              )}
-            </div>
-          </div>
-          <p className="operator-label mt-1">E2E Automation Workbench</p>
+        <div className="operator-sidebar-title">
+          <p>Workspace</p>
+          <span>Project setup and run configuration</span>
         </div>
 
-        {/* Workspace */}
-        <section className="space-y-2">
-          <p className="operator-label">Workspace</p>
+        <AnimatePresence initial={false}>
+          {updateVersion && (
+            <motion.div
+              key="update-available"
+              className="operator-panel-brand"
+              variants={presenceVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={presenceTransition}
+            >
+              <button
+                onClick={() => window.specwright.app.installUpdate()}
+                title={`v${updateVersion} available — click to download`}
+                className="operator-button-primary w-full"
+              >
+                Install update v{updateVersion}
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Project */}
+        <section className="operator-sidebar-section operator-sidebar-section-first">
+          <SidebarHeading
+            title="Project"
+            description={isReady ? undefined : "Open the repository where Specwright should create tests."}
+          />
 
           {isReady ? (
-            <div className="bg-operator-field border border-operator-line operator-stack-sm" style={{ padding: "var(--sw-space-3)" }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-stone-300 text-xs truncate font-mono" title={projectPath}>
-                    {basename(projectPath)}
-                  </p>
-                  <p className="text-stone-600 text-xs truncate" title={projectPath}>
-                    {projectPath}
-                  </p>
-                  <p className="text-[var(--sw-success)] text-xs font-medium flex items-center gap-1 mt-2">
-                    <span className="w-2 h-2 bg-[var(--sw-success)]" />
-                    Active
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="operator-project-summary">
+              <div className="operator-project-row">
+                <div className="min-w-0 flex-1 operator-stack-sm">
+                  <p className="operator-control-label">Current project</p>
+                  <div className="operator-project-dropdown" onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProjectDropdownOpen(false);
+                  }}>
+                    <button
+                      type="button"
+                      className="operator-project-current"
+                      onClick={() => setProjectDropdownOpen((open) => !open)}
+                      title={projectPath}
+                      aria-expanded={projectDropdownOpen}
+                    >
+                      <span className="operator-project-name">{basename(projectPath)}</span>
+                      <span className="operator-project-path">{projectPath}</span>
+                    </button>
+                    {projectDropdownOpen && (
+                      <div className="operator-project-menu">
+                        {projectOptions.length > 0 ? projectOptions.map((project) => (
+                          <button
+                            key={project}
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setProjectDropdownOpen(false);
+                              loadExistingProject(project);
+                            }}
+                            className="operator-project-option"
+                            title={project}
+                          >
+                            <span>{basename(project)}</span>
+                            <small>{project}</small>
+                          </button>
+                        )) : (
+                          <p className="operator-project-empty">No recent projects yet.</p>
+                        )}
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setProjectDropdownOpen(false);
+                            pickAndBootstrap();
+                          }}
+                          className="operator-project-option operator-project-option-action"
+                        >
+                          Open another project
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="operator-project-actions" aria-hidden={projectDropdownOpen}>
                   {confirmReset ? (
                     <>
-                        <span className="text-stone-500 text-xs">Close workspace?</span>
+                        <span className="operator-field-help">Close project?</span>
                       <button
                         onClick={() => { resetProject(); setConfirmReset(false); }}
-                        className="operator-danger hover:text-[var(--sw-danger)] text-xs border border-[var(--sw-danger)] px-2 py-1 transition-colors"
+                        className="operator-button operator-button-compact operator-danger hover:border-[var(--sw-danger)]"
                       >
                         Yes
                       </button>
                       <button
                         onClick={() => setConfirmReset(false)}
-                        className="text-stone-500 hover:text-stone-300 text-xs transition-colors"
+                        className="operator-button operator-button-compact"
                       >
                         No
                       </button>
@@ -383,7 +495,7 @@ export default function ConfigPanel(): React.JSX.Element {
                       <button
                         type="button"
                         onClick={() => loadExistingProject(projectPath)}
-                        className="operator-muted hover:text-[var(--sw-accent)] transition-colors"
+                        className="operator-icon-button"
                         title="Reload project settings"
                       >
                         <SyncButtonIcon />
@@ -391,7 +503,7 @@ export default function ConfigPanel(): React.JSX.Element {
                       <button
                         onClick={() => setConfirmReset(true)}
                         title="Close project"
-                        className="text-stone-500 hover:text-[var(--sw-danger)] transition-colors"
+                        className="operator-icon-button hover:text-[var(--sw-danger)]"
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -401,97 +513,133 @@ export default function ConfigPanel(): React.JSX.Element {
                       </button>
                       <button
                         onClick={pickAndBootstrap}
-                        className="text-stone-500 hover:text-brand-400 text-xs transition-colors"
-                        title="Change project"
+                        className="operator-button operator-button-compact"
+                        title="Switch workspace"
                       >
                         Switch
                       </button>
                     </>
                   )}
+                  </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2 border-t border-operator-line">
-                <div className="min-w-0">
-                  <p className="operator-label">Test plugin</p>
-                  {applyingPlugin ? (
-                    <p className="operator-muted text-xs flex items-center gap-1 mt-1">
-                      <span className="w-2.5 h-2.5 border border-brand-400 border-t-transparent animate-spin inline-block" />
-                      Installing…
-                    </p>
-                  ) : pluginInfo && pluginInfo.name !== "none" ? (
-                    <div className="mt-1 min-w-0">
-                      <p
-                        className="text-stone-300 text-xs font-mono truncate"
-                        title={`${pluginInfo.name}${pluginInfo.version && pluginInfo.version !== "unknown" ? ` v${pluginInfo.version}` : ""}`}
-                      >
-                        {shortName(pluginInfo.name)}
-                        {pluginInfo.version && pluginInfo.version !== "unknown" && (
-                           <span className="text-stone-500 ml-1">v{pluginInfo.version}</span>
-                        )}
-                      </p>
-                      {pluginInfo.hasOverlay && pluginInfo.overlayName && (
-                        <p
-                          className="text-[var(--sw-accent)] text-xs font-mono truncate flex items-center gap-1 mt-1"
-                          title={pluginInfo.overlayName}
-                        >
-                          <span className="text-stone-500">↳</span>
-                          {shortName(pluginInfo.overlayName)}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="operator-muted text-xs mt-1">No plugin detected</p>
-                  )}
-                </div>
-                <button
-                  onClick={() => setShowPluginModal(true)}
-                  disabled={applyingPlugin}
-                  className="text-stone-500 hover:text-brand-400 text-xs transition-colors flex-shrink-0 ml-2 disabled:opacity-40"
-                >
-                  Change plugin
-                </button>
               </div>
             </div>
           ) : (
-            <div className="bg-operator-field border border-operator-line" style={{ padding: "var(--sw-space-3)" }}>
-              <div className="flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="operator-label">Test plugin</p>
-                  {pendingPlugin ? (
+            <p className="operator-text-subtle">Open or bootstrap a project to manage this workspace.</p>
+          )}
+        </section>
+
+        <section className="operator-sidebar-section">
+          <div className="flex items-center justify-between gap-3">
+            <SidebarHeading
+              title="Testing adapter"
+              description="Playwright BDD scaffold, shared steps, and field helpers."
+            />
+            {isReady && (
+              <button
+                onClick={() => setShowPluginModal(true)}
+                disabled={applyingPlugin}
+                className="operator-button-quiet px-2 py-1 disabled:opacity-40"
+              >
+                Change
+              </button>
+            )}
+          </div>
+
+          {isReady ? (
+            <div className="min-w-0">
+              {applyingPlugin ? (
+                <p className="operator-text-subtle flex items-center gap-1 mt-1">
+                  <span className="w-2.5 h-2.5 border border-brand-400 border-t-transparent animate-spin inline-block" />
+                  Installing...
+                </p>
+              ) : pluginInfo && pluginInfo.name !== "none" ? (
+                <div className="mt-1 min-w-0">
+                  <p
+                    className="operator-text truncate"
+                    title={`${pluginInfo.name}${pluginInfo.version && pluginInfo.version !== "unknown" ? ` v${pluginInfo.version}` : ""}`}
+                  >
+                    {shortName(pluginInfo.name)}
+                    {pluginInfo.version && pluginInfo.version !== "unknown" && (
+                      <span className="operator-text-subtle ml-1">v{pluginInfo.version}</span>
+                    )}
+                  </p>
+                  {pluginInfo.hasOverlay && pluginInfo.overlayName && (
                     <p
-                      className="text-[var(--sw-accent)] text-xs font-mono truncate mt-1"
-                      title={pendingPlugin.type === "local" ? pendingPlugin.dirPath : pendingPlugin.packageName}
+                      className="operator-text-accent font-mono truncate flex items-center gap-1 mt-1"
+                      title={pluginInfo.overlayName}
                     >
-                      {pendingPlugin.type === "local"
-                        ? pendingPlugin.dirPath.split("/").pop()
-                        : shortName(pendingPlugin.packageName)}
+                      <span className="text-stone-500">↳</span>
+                      {shortName(pluginInfo.overlayName)}
                     </p>
-                  ) : (
-                    <p className="operator-muted text-xs mt-1">Choose a plugin before bootstrap</p>
                   )}
                 </div>
-                <button
-                  onClick={() => setShowPluginModal(true)}
-                  className="text-stone-500 hover:text-brand-400 text-xs transition-colors flex-shrink-0 ml-2"
-                >
-                  Change plugin
-                </button>
+              ) : (
+                <p className="operator-text-subtle mt-1">Using the default Specwright adapter</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                {pendingPlugin ? (
+                  <p
+                    className="operator-text-accent font-mono truncate mt-1"
+                    title={pendingPlugin.type === "local" ? pendingPlugin.dirPath : pendingPlugin.packageName}
+                  >
+                    {pendingPlugin.type === "local"
+                      ? pendingPlugin.dirPath.split("/").pop()
+                      : shortName(pendingPlugin.packageName)}
+                  </p>
+                ) : (
+                  <p className="operator-text-subtle mt-1">Choose a plugin before bootstrap</p>
+                )}
               </div>
+              <button
+                onClick={() => setShowPluginModal(true)}
+                className="text-stone-500 hover:text-brand-400 text-xs transition-colors flex-shrink-0"
+              >
+                Change plugin
+              </button>
             </div>
           )}
         </section>
+
+        <AnimatePresence initial={false}>
+          {hasMissingSetup && (
+            <motion.div
+              key="needs-attention"
+              variants={presenceVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={presenceTransition}
+            >
+              <ReadinessChecklist
+                title="Needs attention"
+                description="Fix these items before generating tests."
+                steps={setupSteps}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Settings — only shown when project is ready */}
         {isReady && (
           <>
             <section className="operator-form">
               <div className="operator-config-section">
-                <p className="operator-section-title">App under test</p>
+                <div className="flex items-center justify-between gap-3">
+                  <SidebarHeading
+                    title="Website to test"
+                    description={appUrlConfigured ? undefined : "The running app Specwright opens in a browser."}
+                  />
+                  <span className={appUrlConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{appUrlConfigured ? "Set" : "Needed"}</span>
+                </div>
 
               <div>
                 <label className="operator-control-label">App URL</label>
                 <input
+                  ref={appUrlInputRef}
                   type="text"
                   value={envVars.BASE_URL ?? ""}
                   onChange={(e) => setEnvVar("BASE_URL", e.target.value)}
@@ -499,6 +647,7 @@ export default function ConfigPanel(): React.JSX.Element {
                   placeholder="https://app.example.com"
                   className="operator-field w-full px-2 py-2"
                 />
+                <p className="operator-field-help">Specwright opens this app during exploration. Relative page paths such as <span className="font-mono">/dashboard</span> start from here.</p>
               </div>
 
               {envVars.TEST_ENV && (
@@ -515,24 +664,33 @@ export default function ConfigPanel(): React.JSX.Element {
 
               {/* Auth */}
               <div className="operator-config-section">
-                <p className="operator-section-title">Login</p>
+                <div className="flex items-center justify-between gap-3">
+                  <SidebarHeading
+                    title="Sign in before exploring"
+                    description={loginConfigured ? undefined : "Choose whether browser exploration must sign in."}
+                  />
+                  <span className={loginConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{loginConfigured ? authRequired ? "Configured" : "Not needed" : "Needed"}</span>
+              </div>
               <div className="operator-stack-sm">
-                <div className="operator-setting-row">
-                  <label className="operator-checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={authRequired}
-                      onChange={(e) => handleAuthToggle(e.target.checked)}
-                      className="operator-checkbox"
-                    />
-                    <span className="text-operator-ink text-[13px]">App requires login</span>
-                  </label>
+                <div className="operator-setting-row operator-setting-row-explained">
+                  <div className="operator-setting-copy">
+                    <span>Use a login flow</span>
+                    <span>{authRequired ? "Specwright signs in before it explores the app." : "Specwright explores without signing in."}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAuthToggle(!authRequired)}
+                    className="operator-toggle"
+                    data-active={authRequired}
+                    aria-label="Toggle login requirement"
+                  >
+                    <span className="operator-toggle-knob" />
+                  </button>
                 </div>
-
                 {authRequired && (
-                  <div className="operator-inline-card operator-stack-sm">
+                  <div className="operator-stack-sm">
                     <div>
-                      <label className="operator-control-label">Login method</label>
+                      <label className="operator-control-label">How to sign in</label>
                       <div className="flex items-center gap-2">
                         <ThemeSelect
                           value={authStrategy}
@@ -558,19 +716,19 @@ export default function ConfigPanel(): React.JSX.Element {
                     </div>
 
                     {!usesBuiltInAuthSettings ? (
-                      <p className="operator-muted text-xs">
-                        Custom login script: auth-strategies/{authStrategy}.js
+                      <p className="operator-field-help">
+                        Uses <span className="font-mono">auth-strategies/{authStrategy}.js</span> in this project.
                       </p>
                     ) : isConfigured ? (
-                      <p className="operator-muted text-xs">
-                        Using <span className="text-stone-300">{authFields.userEmail}</span>
+                      <p className="operator-field-help">
+                        Login details are saved for <span className="operator-text-muted">{authFields.userEmail}</span>.
                       </p>
                     ) : (
                       <button
                         onClick={() => setShowAuthModal(true)}
-                        className="text-[var(--sw-warning)] text-xs hover:text-[var(--sw-accent-strong)] transition-colors text-left"
+                        className="operator-link text-xs text-left"
                       >
-                         Login details missing. Open settings.
+                         Add login details
                       </button>
                     )}
                   </div>
@@ -579,11 +737,17 @@ export default function ConfigPanel(): React.JSX.Element {
               </div>
 
               {/* LLM Provider settings */}
-              <div className="operator-config-section">
-                <p className="operator-section-title">AI model</p>
+              <div className="operator-config-section" ref={aiSectionRef}>
+                <div className="flex items-center justify-between gap-3">
+                  <SidebarHeading
+                    title="Test writer"
+                    description={aiConfigured ? undefined : "Choose the model that writes feature files and Playwright steps."}
+                  />
+                  <span className={aiConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{aiConfigured ? "Selected" : "Needed"}</span>
+                </div>
               <div className="space-y-2">
-                <label className="operator-control-label">Engine</label>
-                <div className="flex items-center gap-2">
+                <div>
+                  <label className="operator-control-label">Model source</label>
                   <ThemeSelect
                     value={(envVars.SPECWRIGHT_LLM_PROVIDER as string) ?? "anthropic"}
                     onChange={async (provider) => {
@@ -599,10 +763,10 @@ export default function ConfigPanel(): React.JSX.Element {
                       }
                     }}
                     options={[
+                      { value: "opencode", label: "OpenCode local (default)" },
                       { value: "anthropic", label: "Anthropic Claude" },
                       { value: "openai", label: "OpenAI compatible" },
                       { value: "ollama", label: "Ollama local" },
-                      { value: "opencode", label: "OpenCode" },
                     ]}
                   />
                 </div>
@@ -621,115 +785,109 @@ export default function ConfigPanel(): React.JSX.Element {
 
                 {/* OpenCode — compact card */}
                 {(envVars.SPECWRIGHT_LLM_PROVIDER as string) === "opencode" && (
-                  <div className="operator-inline-card flex items-center gap-2">
+                  <div className="operator-inline-row">
                     <span className={`operator-status-dot ${
                       ocStatus === "connected" ? "bg-[var(--sw-success)]" :
                       ocStatus === "error" ? "bg-[var(--sw-danger)]" :
                       "bg-stone-600"
                     }`} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-stone-200 text-[13px] font-medium">OpenCode</p>
-                      <p className="operator-muted text-xs font-mono truncate">
-                        {ocModel || (envVars.SPECWRIGHT_MODEL as string) || OPENCODE_DEFAULT_MODEL}
-                      </p>
-                      <p className="operator-muted text-xs">{ocStatusLabel}</p>
-                    </div>
+                    <span className="operator-text-subtle flex-1">
+                      {ocStatus === "error"
+                        ? "Local model is not reachable. Check OpenCode."
+                        : `${normalizeOpenCodeModel(ocModel || (envVars.SPECWRIGHT_MODEL as string))} selected`}
+                    </span>
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
-                        if (ocServerRunning) {
-                          await window.specwright.opencode.stopServer();
-                          setOcServerRunning(false);
-                          setOcStatus("idle");
-                        } else {
-                          await startAndDetectOpenCode();
-                        }
+                        await startAndDetectOpenCode();
                       }}
-                      className="operator-muted hover:text-[var(--sw-accent)] text-xs shrink-0 transition-colors"
-                      title={ocServerRunning ? "Stop server" : "Start server"}
+                      className="operator-button-quiet px-2 py-1 shrink-0"
+                      title="Check local model"
                     >
                       {ocStarting ? (
                         <span className="w-3 h-3 border border-[var(--sw-accent)] border-t-transparent animate-spin inline-block" />
-                      ) : ocServerRunning ? (
-                        <Pause className="operator-icon" weight="fill" />
                       ) : (
-                        <Play className="operator-icon" weight="fill" />
+                        "Check"
                       )}
                     </button>
                     <button
                       onClick={() => setShowOcModal(true)}
-                      className="operator-muted hover:text-[var(--sw-accent)] text-xs shrink-0 transition-colors"
-                      title="Configure model"
+                      className="operator-button-quiet px-2 py-1 shrink-0"
+                      title="Choose model"
                     >
-                      <GearSix className="operator-icon" weight="bold" />
+                      Model
                     </button>
                   </div>
                 )}
 
-                {(envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode" && (
-                <>
-                <div>
-                  <label className="operator-control-label">Provider URL</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={envVars.SPECWRIGHT_LLM_BASE_URL ?? ""}
-                      onChange={(e) => setEnvVar("SPECWRIGHT_LLM_BASE_URL", e.target.value)}
-                      onBlur={saveEnv}
-                      placeholder="Optional, e.g. http://localhost:11434/v1"
-                      className="operator-field flex-1 px-2 py-2"
-                    />
-                    <button
-                      onClick={async () => {
-                        const base = (envVars.SPECWRIGHT_LLM_BASE_URL as string) ?? "";
-                        if (!base) {
-                          setVerifyStatus("error");
-                          setVerifyMessage("Base URL empty");
-                          return;
-                        }
-                        setVerifyStatus("verifying");
-                        setVerifyMessage(null);
-                        const result = await window.specwright.network.verifyEndpoint(base);
-                        setVerifyStatus(result.ok ? "ok" : "error");
-                        setVerifyMessage(result.message);
-                      }}
-                      className="operator-button"
-                    >
-                      {verifyStatus === "verifying" ? "Checking..." : "Check"}
-                    </button>
-                  </div>
-                  {verifyStatus === "ok" && (
-                    <p className="text-[var(--sw-success)] text-xs mt-1">{verifyMessage}</p>
-                  )}
-                  {verifyStatus === "error" && (
-                    <p className="operator-danger text-xs mt-1">{verifyMessage}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="operator-control-label">API key</label>
-                  <input
-                    type="password"
-                    value={envVars.SPECWRIGHT_LLM_API_KEY ?? ""}
-                    onChange={(e) => setEnvVar("SPECWRIGHT_LLM_API_KEY", e.target.value)}
-                    onBlur={saveEnv}
-                    placeholder="Optional provider key"
-                    className="operator-field w-full px-2 py-2"
-                  />
-                </div>
-                <p className="operator-muted text-xs mt-1">Ollama usually uses <span className="font-mono">http://localhost:11434/v1</span>. For OpenCode, use the card settings.</p>
-                </>
-                )}
               </div>
               </div>
 
-              {/* Test Execution Settings */}
               <div className="operator-config-section">
-                <p className="operator-section-title">Browser run</p>
-                <div className="space-y-2">
+                <SidebarHeading
+                  title="Settings"
+                  description="Run behavior, issue sources, safety, and extra environment values."
+                />
 
-                <label className="operator-setting-row cursor-pointer">
-                  <span className="text-operator-ink text-[13px]">Hide browser window</span>
+                <div className="operator-stack-md">
+                {(envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode" && (
+                <div className="operator-advanced-group">
+                  <p className="operator-control-label">AI connection details</p>
+                  <div>
+                    <label className="operator-field-help">Provider URL</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={envVars.SPECWRIGHT_LLM_BASE_URL ?? ""}
+                        onChange={(e) => setEnvVar("SPECWRIGHT_LLM_BASE_URL", e.target.value)}
+                        onBlur={saveEnv}
+                        placeholder="Optional, e.g. http://localhost:11434/v1"
+                        className="operator-field flex-1 px-2 py-2"
+                      />
+                      <button
+                        onClick={async () => {
+                          const base = (envVars.SPECWRIGHT_LLM_BASE_URL as string) ?? "";
+                          if (!base) {
+                            setVerifyStatus("error");
+                            setVerifyMessage("Base URL empty");
+                            return;
+                          }
+                          setVerifyStatus("verifying");
+                          setVerifyMessage(null);
+                          const result = await window.specwright.network.verifyEndpoint(base);
+                          setVerifyStatus(result.ok ? "ok" : "error");
+                          setVerifyMessage(result.message);
+                        }}
+                        className="operator-button"
+                      >
+                        {verifyStatus === "verifying" ? "Checking..." : "Check"}
+                      </button>
+                    </div>
+                    {verifyStatus === "ok" && <p className="operator-text-success mt-1">{verifyMessage}</p>}
+                    {verifyStatus === "error" && <p className="operator-danger mt-1">{verifyMessage}</p>}
+                  </div>
+                  <div>
+                    <label className="operator-field-help">API key</label>
+                    <input
+                      type="password"
+                      value={envVars.SPECWRIGHT_LLM_API_KEY ?? ""}
+                      onChange={(e) => setEnvVar("SPECWRIGHT_LLM_API_KEY", e.target.value)}
+                      onBlur={saveEnv}
+                      placeholder="Optional provider key"
+                      className="operator-field w-full px-2 py-2"
+                    />
+                  </div>
+                  <p className="operator-section-help">Only needed for local or compatible providers. Ollama usually uses <span className="font-mono">http://localhost:11434/v1</span>.</p>
+                </div>
+                )}
+                <div className="operator-advanced-group">
+                  <p className="operator-control-label">Run defaults</p>
+
+                <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
+                  <span className="operator-setting-copy">
+                    <span>Browser visibility</span>
+                    <span>{envVars.HEADLESS === "true" ? "Hidden during runs." : "Visible for debugging."}</span>
+                  </span>
                   <button
                     onClick={() => { setEnvVar("HEADLESS", envVars.HEADLESS === "true" ? "false" : "true"); saveEnv(); }}
                     className="operator-toggle"
@@ -740,7 +898,7 @@ export default function ConfigPanel(): React.JSX.Element {
                 </label>
 
                 <div>
-                  <label className="operator-control-label">Step timeout</label>
+                  <label className="operator-control-label">Max wait per step</label>
                   <input
                     type="number"
                     value={envVars.TEST_TIMEOUT ?? "120000"}
@@ -748,10 +906,14 @@ export default function ConfigPanel(): React.JSX.Element {
                     onBlur={saveEnv}
                     className="operator-field w-full px-2 py-2"
                   />
+                  <p className="operator-field-help">How long Playwright waits before a step is marked failed.</p>
                 </div>
 
-                <div className="operator-setting-row">
-                  <span className="text-operator-ink text-[13px]">Screenshots</span>
+                <div className="operator-setting-row operator-setting-row-explained">
+                  <span className="operator-setting-copy">
+                    <span>Screenshots</span>
+                    <span>Capture visual evidence when a run fails.</span>
+                  </span>
                   <ThemeSelect
                     value={envVars.ENABLE_SCREENSHOTS === "true" ? "failure" : "off"}
                     onChange={(value) => { setEnvVar("ENABLE_SCREENSHOTS", value === "off" ? "false" : "true"); saveEnv(); }}
@@ -760,8 +922,11 @@ export default function ConfigPanel(): React.JSX.Element {
                   />
                 </div>
 
-                <div className="operator-setting-row">
-                  <span className="text-operator-ink text-[13px]">Video</span>
+                <div className="operator-setting-row operator-setting-row-explained">
+                  <span className="operator-setting-copy">
+                    <span>Video</span>
+                    <span>Keep recordings for failed runs or every run.</span>
+                  </span>
                   <ThemeSelect
                     value={
                       envVars.ENABLE_VIDEO_RECORDING !== "true" ? "off" :
@@ -777,8 +942,11 @@ export default function ConfigPanel(): React.JSX.Element {
                   />
                 </div>
 
-                <label className="operator-setting-row cursor-pointer">
-                  <span className="text-operator-ink text-[13px]">Tracing</span>
+                <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
+                  <span className="operator-setting-copy">
+                    <span>Trace data</span>
+                    <span>Record Playwright traces for deeper debugging.</span>
+                  </span>
                   <button
                     onClick={() => { setEnvVar("ENABLE_TRACING", envVars.ENABLE_TRACING === "true" ? "false" : "true"); saveEnv(); }}
                     className="operator-toggle"
@@ -789,12 +957,14 @@ export default function ConfigPanel(): React.JSX.Element {
                 </label>
 
                 </div>
-              </div>
 
-              <div className="operator-config-section">
-                <p className="operator-section-title">Integrations</p>
-                <label className="operator-setting-row cursor-pointer">
-                  <span className="text-operator-ink text-[13px]">Show Jira source</span>
+                <div className="operator-advanced-group">
+                <p className="operator-control-label">Issue sources</p>
+                <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
+                  <span className="operator-setting-copy">
+                    <span>Show Jira source</span>
+                    <span>Show Jira next to GitLab and uploaded files in Explorer.</span>
+                  </span>
                   <button
                     onClick={() => { setEnvVar("SPECWRIGHT_SHOW_JIRA_SOURCE", envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true" ? "false" : "true"); saveEnv(); }}
                     className="operator-toggle"
@@ -803,15 +973,16 @@ export default function ConfigPanel(): React.JSX.Element {
                     <span className="operator-toggle-knob" />
                   </button>
                 </label>
-              </div>
+                </div>
 
-              <div className="operator-config-section">
-                <p className="operator-section-title">Safety</p>
-
-                <label className="operator-setting-row cursor-pointer">
+                <div className="operator-advanced-group">
+                <p className="operator-control-label">Agent safety</p>
+                <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
                   <div>
-                    <span className="text-operator-ink text-[13px]">Auto-approve tools</span>
-                    <p className="operator-muted text-xs mt-1">Skip permission prompts for agent tools.</p>
+                    <span className="operator-setting-copy">
+                      <span>Auto-approve tools</span>
+                      <span>Let the agent run tools without stopping for confirmation.</span>
+                    </span>
                   </div>
                   <button
                     onClick={() => setSkipPermissions(!skipPermissions)}
@@ -822,20 +993,16 @@ export default function ConfigPanel(): React.JSX.Element {
                   </button>
                 </label>
                 {skipPermissions && (
-                  <p className="text-amber-400/80 text-xs pl-1">
+                  <p className="operator-field-help">
                     Tool calls can run without confirmation in this workspace.
                   </p>
                 )}
+                </div>
 
-              <button
-                type="button"
-                onClick={() => setAdvancedOpen((open) => !open)}
-                className="operator-button justify-between"
-              >
-                <span>Environment variables</span>
-                <span className="operator-muted">{advancedOpen ? "Hide" : `${customVars.length} vars`}</span>
-              </button>
-              {advancedOpen && customVars.length > 0 && (
+                <div className="operator-advanced-group">
+                <p className="operator-control-label">Extra environment variables</p>
+                <p className="operator-section-help">Custom values written to the project env file. Main Specwright settings are managed in the sections above.</p>
+              {customVars.length > 0 && (
                 <div className="space-y-3">
                   {customVars.map(([key, val]) => {
                     const sensitive = isSensitiveKey(key);
@@ -878,8 +1045,8 @@ export default function ConfigPanel(): React.JSX.Element {
                 </div>
               )}
 
-              {advancedOpen && <div className="operator-stack-sm">
-                <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-2">
+              <div className="operator-stack-sm">
+                <div className="operator-stack-sm">
                   <input
                     type="text"
                     value={customVarKey}
@@ -902,7 +1069,10 @@ export default function ConfigPanel(): React.JSX.Element {
                 >
                   + Add var
                 </button>
-              </div>}
+              </div>
+              </div>
+
+              </div>
               </div>
             </section>
           </>

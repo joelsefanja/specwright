@@ -1,12 +1,32 @@
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import { Minus, Square, X } from "@phosphor-icons/react";
+import { sidebarTransition } from "@renderer/motion/presets";
 
 interface Props {
   left: React.ReactNode;
   center: React.ReactNode;
   right?: React.ReactNode;
   scalePercent?: number;
+  theme?: string;
+  onThemeChange?: (theme: string) => void;
+  motion?: string;
+  onMotionChange?: (motion: string) => void;
+  appVersion?: string;
 }
+
+const THEMES = [
+  { value: "slate", label: "Dark Slate" },
+  { value: "graphite", label: "Dark Graphite" },
+  { value: "paper", label: "Light Paper" },
+  { value: "sand", label: "Light Sand" },
+] as const;
+
+const MOTIONS = [
+  { value: "calm", label: "Calm" },
+  { value: "operator", label: "Motion" },
+  { value: "expressive", label: "Expressive" },
+] as const;
 
 /** Sidebar / panel layout icon — rectangle split into two columns, one highlighted */
 function LayoutIcon({ highlight }: { highlight: "left" | "right" }): React.JSX.Element {
@@ -36,7 +56,7 @@ const ICON_BTN =
 const LEFT_BTN_INSET = 86; // px from left edge of center panel when left panel is collapsed
 const RIGHT_BTN_INSET = 10; // px from right edge of window
 
-export default function ThreePanelLayout({ left, center, right, scalePercent = 100 }: Props): React.JSX.Element {
+export default function ThreePanelLayout({ left, center, right, scalePercent = 100, theme = "slate", onThemeChange, motion: motionPreset = "operator", onMotionChange, appVersion }: Props): React.JSX.Element {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
@@ -65,11 +85,12 @@ export default function ThreePanelLayout({ left, center, right, scalePercent = 1
             <LayoutIcon highlight={leftCollapsed ? "right" : "left"} />
           </button>
 
-          {/* App name — centred in title bar */}
-          <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none">
-            <span className="text-stone-500 text-[10px] font-semibold tracking-[0.22em] uppercase">
-              Specwright
-            </span>
+          {/* App identity — centered in title bar */}
+          <div className="operator-titlebar-brand">
+            <span className="operator-titlebar-mark">S</span>
+            <span className="operator-titlebar-name">Specwright</span>
+            {appVersion && <span className="operator-titlebar-version">v{appVersion}</span>}
+            <span className="operator-titlebar-product">E2E Automation Workbench</span>
           </div>
 
           <div
@@ -82,6 +103,32 @@ export default function ThreePanelLayout({ left, center, right, scalePercent = 1
             >
               {scalePercent}%
             </div>
+
+            {onThemeChange && (
+              <select
+                value={theme}
+                onChange={(event) => onThemeChange(event.target.value)}
+                className="operator-theme-select"
+                title="Theme"
+              >
+                {THEMES.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            )}
+
+            {onMotionChange && (
+              <select
+                value={motionPreset}
+                onChange={(event) => onMotionChange(event.target.value)}
+                className="operator-theme-select"
+                title="Motion"
+              >
+                {MOTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            )}
 
             {right && (
               <button
@@ -123,14 +170,16 @@ export default function ThreePanelLayout({ left, center, right, scalePercent = 1
           </div>
         </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] overflow-hidden">
+      <div className="app-stagger-root grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] overflow-hidden">
         {/* ── Left panel ── */}
-        <div
-            className="flex flex-col bg-operator-panel border-r border-operator-line flex-shrink-0 transition-[width] duration-200 overflow-hidden"
-          style={{ width: leftCollapsed ? 0 : "var(--sw-sidebar-width)", paddingTop: 0, minWidth: 0 }}
+        <motion.div
+          className="flex flex-col bg-operator-panel border-r border-operator-line flex-shrink-0 overflow-hidden"
+          animate={{ width: leftCollapsed ? 0 : "var(--sw-sidebar-width)" }}
+          transition={sidebarTransition}
+          style={{ paddingTop: 0, minWidth: 0 }}
         >
           {left}
-        </div>
+        </motion.div>
 
         {/* ── Center ── */}
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -141,12 +190,14 @@ export default function ThreePanelLayout({ left, center, right, scalePercent = 1
 
       {/* ── Right panel ── */}
       {right && (
-        <div
-          className="flex flex-col bg-[#0b0a09] border-l border-operator-line flex-shrink-0 transition-[width] duration-200 overflow-hidden"
-          style={{ width: rightCollapsed ? 0 : 360, minWidth: 0 }}
+        <motion.div
+          className="flex flex-col bg-operator-panel border-l border-operator-line flex-shrink-0 overflow-hidden"
+          animate={{ width: rightCollapsed ? 0 : 360 }}
+          transition={sidebarTransition}
+          style={{ minWidth: 0 }}
         >
           {right}
-        </div>
+        </motion.div>
       )}
       </div>
     </div>

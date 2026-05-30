@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { ChartBar, Play } from "@phosphor-icons/react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChartBar, Play, Plus } from "@phosphor-icons/react";
 import WelcomeScreen from "./WelcomeScreen";
 import InstructionsBuilder from "./InstructionsBuilder";
 import HealerPanel from "./HealerPanel";
@@ -7,12 +8,15 @@ import { AgentOutputPanel } from "./AgentOutputPanel";
 import { RunTestsPalette } from "./RunTestsPalette";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
 import { useConfigStore } from "@renderer/store/config.store";
+import { useInstructionStore } from "@renderer/store/instruction.store";
 import { useReportAvailability } from "@renderer/hooks/useReportAvailability";
 import { detectPhaseFromTool, detectPhaseFromText } from "@renderer/hooks/usePhaseDetection";
+import { motionTransition, panelVariants } from "@renderer/motion/presets";
 
 export default function CenterPanel(): React.JSX.Element {
-  const { appendToken, appendLog, finishRun, setError, setActivePhase, setPhaseStatus, splitForPhase, status, setMcpStatus } = usePipelineStore();
+  const { appendToken, appendLog, finishRun, setError, abortRun, setActivePhase, setPhaseStatus, splitForPhase, status, setMcpStatus, updateDirectRun } = usePipelineStore();
   const { projectState, loaded, hydrate, activeTab, setActiveTab, projectPath } = useConfigStore();
+  const addInstruction = useInstructionStore((s) => s.addCard);
   const lastPhaseRef = React.useRef<number>(0);
   const runId = usePipelineStore((s) => s.runId);
 
@@ -54,13 +58,23 @@ export default function CenterPanel(): React.JSX.Element {
     setShowRunPicker(false);
   }, []);
 
-  const handleRunTests = useCallback(async (arg: string) => {
+  const handleRunTests = useCallback(async (arg: string, options?: { headed?: boolean; integrated?: boolean }) => {
     closeRunPicker();
-    const { resumeRun } = usePipelineStore.getState();
-    const userMessage = `/e2e-run ${arg}`.trim();
-    resumeRun(userMessage);
+    const { startRun, appendLog, appendToken, setError } = usePipelineStore.getState();
+    const browserFlag = options?.integrated ? " --integrated-browser" : options?.headed ? " --headed" : "";
+    const userMessage = `/e2e-run ${arg}${browserFlag}`.trim();
+    startRun(userMessage);
+    const browserLabel = options?.integrated ? " (integrated browser)" : options?.headed ? " (visible browser)" : "";
+    appendLog(`[runner] Starting direct test run: ${arg || "all tests"}${browserLabel}`);
+    appendToken(`Starting direct test run: ${arg || "all tests"}${options?.integrated ? "\nBrowser: Desktop integrated browser via CDP" : options?.headed ? "\nBrowser: visible Playwright window" : ""}\n\nWaiting for command resolution...\n`);
     const { skipPermissions } = useConfigStore.getState();
-    await window.specwright.pipeline.start({ userMessage, mode: "claude-code", skipPermissions });
+    try {
+      await window.specwright.pipeline.start({ userMessage, mode: "claude-code", skipPermissions });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      appendLog(`[runner] Failed to start direct test run: ${message}`);
+      setError(message);
+    }
   }, [closeRunPicker]);
 
   useEffect(() => {
@@ -111,6 +125,7 @@ export default function CenterPanel(): React.JSX.Element {
       checkReportAvailability();
     });
     const offError = window.specwright.pipeline.onError(({ error }) => setError(error));
+    const offAborted = window.specwright.pipeline.onAborted(({ fullText }) => abortRun(fullText || "Aborted by user"));
     const offLog   = window.specwright.pipeline.onLog(({ line }) => {
       appendLog(line);
 
@@ -130,6 +145,9 @@ export default function CenterPanel(): React.JSX.Element {
         }
       }
     });
+    const offDirectRunUpdate = window.specwright.pipeline.onDirectRunUpdate((patch) => {
+      updateDirectRun(patch);
+    });
     const offPerm  = window.specwright.pipeline.onPermissionRequest((request) => {
       showPermission({ ...request, timestamp: Date.now() });
     });
@@ -144,10 +162,10 @@ export default function CenterPanel(): React.JSX.Element {
       setMcpStatus(server, mcpSt);
     });
     return () => {
-      offToken(); offDone(); offError(); offLog();
-      offPerm(); offToolStart(); offToolEnd(); offMcpStatus();
+      offToken(); offDone(); offError(); offAborted(); offLog();
+      offPerm(); offToolStart(); offToolEnd(); offMcpStatus(); offDirectRunUpdate();
     };
-  }, [handleToken, appendLog, finishRun, setError, setPhaseStatus, showPermission, advanceToPhase, setMcpStatus, checkReportAvailability]);
+  }, [handleToken, appendLog, finishRun, setError, abortRun, setPhaseStatus, showPermission, advanceToPhase, setMcpStatus, updateDirectRun, checkReportAvailability]);
 
   if (!loaded) {
     return (
@@ -161,7 +179,7 @@ export default function CenterPanel(): React.JSX.Element {
     return <WelcomeScreen />;
   }
 
-  const showOutput = status === "running" || status === "done" || status === "error";
+  const showOutput = status === "running" || status === "done" || status === "error" || status === "aborted";
   const hasReports = reportAvailability.playwright || reportAvailability.bdd;
 
   const reportDropdown = (
@@ -204,21 +222,36 @@ export default function CenterPanel(): React.JSX.Element {
               className="operator-tab"
               data-active={activeTab === "explorer"}
             >
-              Explorer
+              {activeTab === "explorer" && (
+                <motion.span className="operator-tab-indicator" layoutId="operator-tab-indicator" transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} />
+              )}
+              <span className="operator-tab-label">
+              Create Tests
+              </span>
             </button>
             <button
               onClick={() => setActiveTab("healer")}
               className="operator-tab"
               data-active={activeTab === "healer"}
             >
-              Healer
+              {activeTab === "healer" && (
+                <motion.span className="operator-tab-indicator" layoutId="operator-tab-indicator" transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} />
+              )}
+              <span className="operator-tab-label">
+              Repair Tests
+              </span>
             </button>
           </div>
           <div className="operator-toolbar-actions">
+            {activeTab === "explorer" && (
+              <button onClick={addInstruction} className="operator-button-primary gap-2">
+                <Plus className="operator-icon" weight="bold" /> Add instruction
+              </button>
+            )}
             {hasTests && (
               <button
                 onClick={openRunPicker}
-                className="operator-button operator-toolbar-action-primary text-[var(--sw-accent-strong)] hover:text-[var(--sw-accent-strong)]"
+                className="operator-button-primary operator-toolbar-action-primary"
               >
                 <Play className="operator-icon" weight="fill" /> Run Tests
               </button>
@@ -237,24 +270,38 @@ export default function CenterPanel(): React.JSX.Element {
 
       {/* Main content */}
       <div className="flex-1 min-h-0 flex flex-col">
-        {showOutput ? (
-          <AgentOutputPanel onOpenRunPicker={openRunPicker} />
-        ) : activeTab === "healer" ? (
-          <HealerPanel />
-        ) : (
-          <InstructionsBuilder />
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={showOutput ? "output" : activeTab}
+            className="flex-1 min-h-0 flex flex-col"
+            variants={panelVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            transition={motionTransition}
+          >
+            {showOutput ? (
+              <AgentOutputPanel onOpenRunPicker={openRunPicker} />
+            ) : activeTab === "healer" ? (
+              <HealerPanel />
+            ) : (
+              <InstructionsBuilder />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      {showRunPicker && (
-        <RunTestsPalette
-          testScripts={testScripts}
-          featureModules={featureModules}
-          onRun={handleRunTests}
-          onClose={closeRunPicker}
-          inputRef={customInputRef}
-        />
-      )}
+      <AnimatePresence>
+        {showRunPicker && (
+          <RunTestsPalette
+            testScripts={testScripts}
+            featureModules={featureModules}
+            onRun={handleRunTests}
+            onClose={closeRunPicker}
+            inputRef={customInputRef}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

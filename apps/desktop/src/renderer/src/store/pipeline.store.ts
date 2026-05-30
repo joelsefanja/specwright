@@ -13,6 +13,16 @@ export interface Phase {
 
 export type PipelineStatus = "idle" | "running" | "done" | "error" | "aborted";
 
+export interface DirectRunMeta {
+  isDirectRun: boolean;
+  command: string | null;
+  cwd: string | null;
+  browserUrl: string | null;
+  localApps: "pending" | "running" | "done" | "error";
+  auth: "pending" | "running" | "done" | "error";
+  tests: "pending" | "running" | "done" | "error";
+}
+
 export interface ExploreResult {
   url: string;
   title: string;
@@ -45,6 +55,7 @@ interface PipelineState {
   status: PipelineStatus;
   messages: ChatMessage[];
   logLines: string[];
+  directRun: DirectRunMeta;
   activePhase: number;
   /** Monotonic counter incremented every fresh startRun. Consumers use this
    * to reset per-run refs (e.g. CenterPanel's lastPhaseRef) on a new run. */
@@ -68,8 +79,10 @@ interface PipelineState {
   injectUserMessage: (text: string) => void;
   appendToken: (token: string) => void;
   appendLog: (line: string) => void;
+  updateDirectRun: (patch: Partial<DirectRunMeta>) => void;
   finishRun: (fullText: string, sessionId?: string, userMessage?: string) => void;
   setError: (msg: string) => void;
+  abortRun: (msg?: string) => void;
   clearFeed: () => void;
   setActivePhase: (id: number) => void;
   setPhaseStatus: (id: number, status: PhaseStatus, durationMs?: number) => void;
@@ -107,10 +120,29 @@ function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function sanitizeLogLine(line: string): string {
+  return line
+    // ANSI CSI/OSC/control sequences from Playwright, Angular dev server, npm, etc.
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001b[()][A-Z0-9]/gi, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .trimEnd();
+}
+
 export const usePipelineStore = create<PipelineState>((set) => ({
   status: "idle",
   messages: [],
   logLines: [],
+  directRun: {
+    isDirectRun: false,
+    command: null,
+    cwd: null,
+    browserUrl: null,
+    localApps: "pending",
+    auth: "pending",
+    tests: "pending",
+  },
   activePhase: 0,
   runId: 0,
   phases: PHASES.map((p) => ({ ...p })),
@@ -135,6 +167,15 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     set((s) => ({
       status: "running",
       logLines: [],
+      directRun: {
+        isDirectRun: userMessage.trim().startsWith("/e2e-run"),
+        command: null,
+        cwd: null,
+        browserUrl: null,
+        localApps: "pending",
+        auth: "pending",
+        tests: "pending",
+      },
       activePhase: 1,
       runId: s.runId + 1,
       errorMessage: null,
@@ -184,7 +225,14 @@ export const usePipelineStore = create<PipelineState>((set) => ({
     }),
 
   appendLog: (line) =>
-    set((s) => ({ logLines: [...s.logLines, line] })),
+    set((s) => {
+      const clean = sanitizeLogLine(line);
+      if (!clean.trim()) return s;
+      return { logLines: [...s.logLines, clean] };
+    }),
+
+  updateDirectRun: (patch) =>
+    set((s) => ({ directRun: { ...s.directRun, ...patch } })),
 
   finishRun: (_fullText, sessionId, userMessage) =>
     set((s) => {
@@ -219,11 +267,36 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       return { messages, status: "error", errorMessage: msg, pendingPermission: null };
     }),
 
+  abortRun: (msg = "Aborted by user") =>
+    set((s) => {
+      const messages = [...s.messages];
+      const lastIdx = messages.length - 1;
+      if (lastIdx >= 0 && messages[lastIdx].role === "assistant") {
+        const current = messages[lastIdx].content;
+        messages[lastIdx] = {
+          ...messages[lastIdx],
+          content: current || msg,
+          isStreaming: false,
+          stableLength: (current || msg).length,
+        };
+      }
+      return { messages, status: "aborted", errorMessage: null, pendingPermission: null, activeTool: null };
+    }),
+
   clearFeed: () =>
     set({
       status: "idle",
       messages: [],
       logLines: [],
+      directRun: {
+        isDirectRun: false,
+        command: null,
+        cwd: null,
+        browserUrl: null,
+        localApps: "pending",
+        auth: "pending",
+        tests: "pending",
+      },
       activePhase: 0,
       errorMessage: null,
       pendingPermission: null,

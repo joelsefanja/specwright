@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ArrowRight, CheckCircle, FolderOpen, GitBranch, PlayCircle, ShieldCheck } from "@phosphor-icons/react";
 
 function SpecwrightLogo({ size = 48 }: { size?: number }): React.JSX.Element {
   return (
@@ -75,30 +76,29 @@ export default function WelcomeScreen(): React.JSX.Element {
   if (selectedFolder) {
     const folderLabel = selectedFolder.split("/").slice(-2).join("/");
     return (
-      <div className="flex h-full items-center justify-center overflow-y-auto px-8 py-8">
-        <div className="grid w-full max-w-5xl grid-cols-[1fr_1.15fr] gap-8">
-          <div className="operator-card operator-stack-md">
+      <div className="operator-welcome-shell">
+        <div className="operator-welcome-setup-grid">
+          <div className="operator-welcome-hero-card operator-stack-md">
             <div>
-              <div className="mb-4"><SpecwrightLogo size={56} /></div>
-              <p className="operator-label operator-text-accent">Setup</p>
-              <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.08em] text-operator-ink">Prepare this project</h2>
-              <p className="operator-text-muted mt-3">
+              <div className="operator-welcome-logo"><SpecwrightLogo size={58} /></div>
+              <p className="operator-label operator-text-accent">Setup protocol</p>
+              <h2 className="operator-welcome-title">Prepare this project</h2>
+              <p className="operator-welcome-copy">
                 Specwright installs a Playwright BDD workspace into your app, then guides you through issue context, browser exploration, generation, test execution, and repair.
               </p>
             </div>
-            <div className="operator-inline-panel operator-stack-sm">
+            <div className="operator-welcome-selected-folder">
               <p className="operator-label">Selected folder</p>
               <p className="operator-text font-mono truncate" title={selectedFolder}>.../{folderLabel}</p>
             </div>
-            <div className="operator-stack-sm">
+            <div className="operator-welcome-mini-steps">
               {[
-                ["01", "Choose authentication", "Tell Specwright how your app logs in."],
-                ["02", "Bootstrap framework", "Install the plugin, fixtures, examples, and agent instructions."],
-                ["03", "Add work context", "Attach GitLab/Jira/files so generated tests match real tasks."],
-                ["04", "Generate and run", "Explore the app, write BDD tests, run them, then repair failures."],
+                [ShieldCheck, "Choose authentication", "Tell Specwright how your app logs in."],
+                [GitBranch, "Bootstrap framework", "Install fixtures, examples, agents, and skills."],
+                [PlayCircle, "Generate and run", "Explore, write BDD tests, execute, then repair."],
               ].map(([code, title, desc]) => (
-                <div key={code} className="grid grid-cols-[40px_1fr] gap-3 border-t border-operator-line pt-3 first:border-t-0 first:pt-0">
-                  <span className="operator-label operator-text-accent">{code}</span>
+                <div key={title as string}>
+                  {React.createElement(code as typeof ShieldCheck, { weight: "bold", className: "operator-welcome-step-icon" })}
                   <div>
                     <p className="operator-text font-semibold">{title}</p>
                     <p className="operator-text-subtle">{desc}</p>
@@ -108,36 +108,35 @@ export default function WelcomeScreen(): React.JSX.Element {
             </div>
           </div>
 
-          <div className="operator-card operator-stack-md">
+          <div className="operator-welcome-auth-card operator-stack-md">
             <div>
-              <p className="operator-label">Authentication</p>
-              <h3 className="mt-2 text-xl font-semibold text-operator-ink">How should tests sign in?</h3>
-              <p className="operator-text-muted mt-2">
+              <p className="operator-label operator-text-accent">Authentication</p>
+              <h3 className="operator-welcome-section-title">How should tests sign in?</h3>
+              <p className="operator-welcome-copy operator-welcome-copy-sm">
                 This controls which auth module is installed. You can change details later from the sidebar.
               </p>
             </div>
 
-            <div className="operator-stack-sm">
+            <div className="operator-auth-choice-list">
               {AUTH_STRATEGIES.map(({ value, title, desc }) => (
                 <button
                   type="button"
                   key={value}
                   onClick={() => setAuthStrategy(value)}
                   disabled={isBootstrapping}
-                  className={`operator-list-item border ${authStrategy === value ? "border-[var(--sw-accent)] bg-[var(--sw-accent-soft)]" : "border-operator-line bg-operator-field"}`}
+                  className="operator-auth-choice"
+                  data-selected={authStrategy === value}
                 >
-                  <div className="flex items-start gap-3">
-                    <span className={`mt-1 h-3 w-3 border ${authStrategy === value ? "border-[var(--sw-accent)] bg-[var(--sw-accent)]" : "border-operator-line"}`} />
-                    <div>
+                  <span className="operator-auth-choice-marker" />
+                  <span>
                       <p className="operator-text font-semibold">{title}</p>
                       <p className="operator-text-subtle mt-1">{desc}</p>
-                    </div>
-                  </div>
+                  </span>
                 </button>
               ))}
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-t border-operator-line pt-4">
+            <div className="operator-welcome-action-row">
               <button
                 onClick={handleBack}
                 disabled={isBootstrapping}
@@ -156,7 +155,7 @@ export default function WelcomeScreen(): React.JSX.Element {
                     Bootstrapping
                   </>
                 ) : (
-                  <>Bootstrap project</>
+                  <>Bootstrap project <ArrowRight className="operator-icon" weight="bold" /></>
                 )}
               </button>
             </div>
@@ -196,51 +195,59 @@ export default function WelcomeScreen(): React.JSX.Element {
 
   // ── Step 1: landing (pick folder) ────────────────────────────────────────
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto px-8 py-8">
-      <div className="grid w-full max-w-6xl grid-cols-[1.05fr_1fr] gap-8">
-        <div className="operator-card operator-stack-md">
-          <div>
-            <div className="mb-5"><SpecwrightLogo size={72} /></div>
-            <p className="operator-label operator-text-accent">Specwright</p>
-            <h1 className="mt-3 text-4xl font-semibold uppercase tracking-[0.08em] text-operator-ink">AI test automation workspace</h1>
-            <p className="operator-text-muted mt-4 max-w-xl">
+    <div className="operator-welcome-shell">
+      <div className="operator-welcome-grid">
+        <section className="operator-welcome-hero-card">
+          <div className="operator-welcome-logo"><SpecwrightLogo size={74} /></div>
+          <div className="operator-welcome-kicker-row">
+            <span>Specwright</span>
+            <span>Playwright BDD</span>
+            <span>Agent Workbench</span>
+          </div>
+          <h1 className="operator-welcome-title operator-welcome-title-xl">AI test automation workspace</h1>
+          <p className="operator-welcome-copy">
               Turn product work into Playwright BDD tests. Specwright reads your issue context, explores the browser, writes feature files and step definitions, runs tests, and helps repair failures.
             </p>
-          </div>
-          <div className="flex gap-3">
+          <div className="operator-welcome-primary-actions">
             <button
               onClick={handlePickFolder}
               disabled={isBootstrapping}
-              className="operator-button-primary gap-3 px-8 py-4"
+              className="operator-welcome-primary-button"
             >
-              Select project folder
+              <FolderOpen className="operator-icon" weight="bold" /> Select project folder <ArrowRight className="operator-icon" weight="bold" />
             </button>
           </div>
-          <p className="operator-text-subtle">
+          <p className="operator-welcome-footnote">
             Choose an existing app repo. If it already contains Specwright files, it opens immediately. Otherwise you will bootstrap it first.
           </p>
-        </div>
-
-        <div className="operator-card operator-stack-md">
-          <div>
-            <p className="operator-label">How the workflow works</p>
-            <h2 className="mt-2 text-2xl font-semibold text-operator-ink">From issue to runnable test</h2>
+          <div className="operator-welcome-proof-strip">
+            <span><CheckCircle weight="fill" /> Local-first</span>
+            <span><CheckCircle weight="fill" /> BDD scaffold</span>
+            <span><CheckCircle weight="fill" /> Self-healing loop</span>
           </div>
+        </section>
+
+        <section className="operator-welcome-flow-card">
+          <p className="operator-label operator-text-accent">Workflow</p>
+          <h2 className="operator-welcome-section-title">From issue to runnable test</h2>
+          <p className="operator-welcome-copy operator-welcome-copy-sm">A focused sequence: connect context, inspect the app, generate readable BDD, then run and repair.</p>
+          <div className="operator-welcome-flow-list">
           {[
             ["01", "Connect context", "Load GitLab/Jira issues, files, or manual instructions so the agent knows what to test."],
             ["02", "Explore the app", "The browser agent validates selectors and records evidence before generation."],
             ["03", "Generate BDD", "Specwright writes feature files and step definitions into the project structure."],
             ["04", "Run and repair", "Execute tests, inspect reports, and use the healer when selectors or flows fail."],
           ].map(([code, title, desc]) => (
-            <div key={code} className="operator-inline-panel grid grid-cols-[44px_1fr] gap-3">
-              <span className="operator-label operator-text-accent">{code}</span>
+            <div key={code} className="operator-welcome-flow-step">
+              <span>{code}</span>
               <div>
                 <p className="operator-text font-semibold">{title}</p>
                 <p className="operator-text-subtle mt-1">{desc}</p>
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   );

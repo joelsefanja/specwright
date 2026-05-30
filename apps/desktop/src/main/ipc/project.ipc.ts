@@ -18,7 +18,12 @@ export function registerProjectIpc(
       execFile("glab", args, { cwd, windowsHide: true }, (error, stdout, stderr) => {
         if (error) {
           const notFound = (error as NodeJS.ErrnoException).code === "ENOENT" || error.message.includes("not recognized");
-          const message = notFound ? "glab was not found on PATH. Install GitLab CLI or add it to PATH." : (stderr || error.message || "glab command failed");
+          const rawMessage = stderr || error.message || "glab command failed";
+          const message = notFound
+            ? "glab was not found on PATH. Install GitLab CLI or add it to PATH."
+            : rawMessage.toLowerCase().includes("unauthenticated")
+              ? "GitLab authentication failed. Run glab auth login for this GitLab host."
+              : rawMessage;
           fileLog(`[gitlab] error=${message.trim()}`);
           reject(new Error(message));
           return;
@@ -26,6 +31,22 @@ export function registerProjectIpc(
         if (stderr.trim()) fileLog(`[gitlab] stderr=${stderr.trim()}`);
         fileLog(`[gitlab] ok bytes=${stdout.length}`);
         resolve(stdout);
+      });
+    });
+  };
+
+  const runGlabBuffer = (args: string[], cwd: string): Promise<Buffer> => {
+    return new Promise((resolve, reject) => {
+      fileLog(`[gitlab] cwd=${cwd}`);
+      fileLog(`[gitlab] glab ${args.join(" ")}`);
+      execFile("glab", args, { cwd, windowsHide: true, encoding: "buffer", maxBuffer: 20 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          const message = stderr?.toString("utf-8") || error.message || "glab command failed";
+          fileLog(`[gitlab] error=${message.trim()}`);
+          reject(new Error(message));
+          return;
+        }
+        resolve(stdout as Buffer);
       });
     });
   };
@@ -72,6 +93,16 @@ export function registerProjectIpc(
       const raw = await runGlab(["api", "user"], cwd);
       const data = JSON.parse(raw) as { username?: string };
       return data.username ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getGitLabProjectId = async (cwd: string, repo: string): Promise<string | null> => {
+    try {
+      const raw = await runGlab(["api", `projects/${encodeURIComponent(repo)}`], cwd);
+      const data = JSON.parse(raw) as { id?: number | string };
+      return data.id ? String(data.id) : null;
     } catch {
       return null;
     }
@@ -350,12 +381,49 @@ export function registerProjectIpc(
     return configService.getProjectPath();
   });
 
-  ipcMain.handle("project:read-gitlab-source", (_event, projectPath: string, relativePath: string) => {
+  ipcMain.handle("project:read-gitlab-source", async (_event, projectPath: string, relativePath: string) => {
     const fullPath = path.resolve(projectPath, relativePath);
     const projectRoot = path.resolve(projectPath);
     if (!fullPath.startsWith(projectRoot)) throw new Error("File path is outside project");
     const markdown = fs.readFileSync(fullPath, "utf-8");
-    const images = Array.from(markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((match) => match[1]).filter(Boolean);
+    const issueUrl = markdown.match(/^- URL:\s*(\S+)/m)?.[1];
+    const projectBaseUrl = issueUrl?.replace(/\/-\/(issues|work_items|merge_requests)\/.*$/, "");
+    const repoFromIssueUrl = issueUrl ? new URL(issueUrl).pathname.match(/^\/?(.+?)\/-\/(issues|work_items|merge_requests)\//)?.[1] : null;
+    const projectId = repoFromIssueUrl ? await getGitLabProjectId(projectPath, repoFromIssueUrl) : null;
+    const resolveImageUrl = (src: string): string => {
+      if (/^https?:\/\//i.test(src)) return src;
+      if (!projectBaseUrl) return src;
+      if (src.startsWith("/uploads/") && issueUrl && projectId) {
+        const origin = new URL(issueUrl).origin;
+        return `${origin}/-/project/${projectId}${src}`;
+      }
+      if (src.startsWith("/uploads/")) return `${projectBaseUrl}${src}`;
+      return new URL(src, `${projectBaseUrl}/`).toString();
+    };
+    const mimeFor = (src: string): string => {
+      const clean = src.split("?")[0].toLowerCase();
+      if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+      if (clean.endsWith(".gif")) return "image/gif";
+      if (clean.endsWith(".webp")) return "image/webp";
+      if (clean.endsWith(".svg")) return "image/svg+xml";
+      return "image/png";
+    };
+    const imageSources = Array.from(markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g))
+      .map((match) => match[1]?.trim())
+      .filter(Boolean)
+      .map(resolveImageUrl);
+    const images = await Promise.all(imageSources.map(async (src) => {
+      try {
+        if (!projectId) return src;
+        const uploadMatch = new URL(src).pathname.match(/\/uploads\/(.+)$/);
+        if (!uploadMatch) return src;
+        const bytes = await runGlabBuffer(["api", `projects/${projectId}/uploads/${uploadMatch[1]}`], projectPath);
+        return `data:${mimeFor(src)};base64,${bytes.toString("base64")}`;
+      } catch (error) {
+        fileLog(`[gitlab] image fetch failed src=${src} error=${error instanceof Error ? error.message : String(error)}`);
+        return src;
+      }
+    }));
     return { markdown, images };
   });
 
@@ -397,7 +465,7 @@ export function registerProjectIpc(
     projectService.writeCustomTemplates(p, templates as Parameters<typeof projectService.writeCustomTemplates>[1]);
   });
 
-  // Read test:bdd* scripts from project package.json → used to populate Run Tests picker
+  // Read E2E scripts from project package.json → used to populate Run Tests picker
   ipcMain.handle("project:read-test-scripts", (_event, p: string): Record<string, string> => {
     const pkgPath = path.join(p, "package.json");
     if (!fs.existsSync(pkgPath)) return {};
@@ -405,7 +473,7 @@ export function registerProjectIpc(
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
       const scripts: Record<string, string> = pkg.scripts ?? {};
       return Object.fromEntries(
-        Object.entries(scripts).filter(([k]) => k.startsWith("test:bdd"))
+        Object.entries(scripts).filter(([k]) => k.startsWith("test:bdd") || k.startsWith("test:e2e"))
       );
     } catch {
       return {};

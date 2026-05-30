@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { motion } from "framer-motion";
+import { motionTransition, paletteVariants } from "@renderer/motion/presets";
 
 type PaletteItem =
   | { kind: "module";   label: string; arg: string }
@@ -6,11 +8,11 @@ type PaletteItem =
   | { kind: "script";  label: string; arg: string }
   | { kind: "custom";  label: string; arg: string };
 
-const kindMeta: Record<PaletteItem["kind"], { code: string; badge: string; badgeCls: string; rowHover: string }> = {
-  module:   { code: "MD", badge: "Module",   badgeCls: "text-brand-400 bg-brand-950/60 border-brand-800/40", rowHover: "hover:bg-operator-field" },
-  workflow: { code: "WF", badge: "Workflow", badgeCls: "text-brand-300 bg-brand-950/40 border-brand-800/40", rowHover: "hover:bg-operator-field" },
-  script:   { code: "SH", badge: "Script",   badgeCls: "text-stone-400 bg-operator-field border-operator-line", rowHover: "hover:bg-operator-field" },
-  custom:   { code: "CU", badge: "Custom",   badgeCls: "text-amber-400 bg-amber-950/40 border-amber-800/30", rowHover: "hover:bg-operator-field" },
+const kindMeta: Record<PaletteItem["kind"], { code: string }> = {
+  module: { code: "Module" },
+  workflow: { code: "Workflow" },
+  script: { code: "Script" },
+  custom: { code: "Custom" },
 };
 
 export function RunTestsPalette({
@@ -22,25 +24,29 @@ export function RunTestsPalette({
 }: {
   testScripts: Record<string, string>;
   featureModules: { modules: string[]; workflows: string[] };
-  onRun: (arg: string) => void;
+  onRun: (arg: string, options?: { headed?: boolean; integrated?: boolean }) => void | Promise<void>;
   onClose: () => void;
   inputRef: React.RefObject<HTMLInputElement>;
 }): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  const [launchingArg, setLaunchingArg] = useState<string | null>(null);
+  const [headed, setHeaded] = useState(false);
+  const [integrated, setIntegrated] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   const allItems = React.useMemo((): PaletteItem[] => {
     const items: PaletteItem[] = [];
-    const allScript = Object.keys(testScripts).find((k) => k === "test:bdd") ?? "test:bdd";
+    const allScript = Object.keys(testScripts).find((k) => k === "test:bdd" || k === "test:e2e") ?? "test:e2e";
+    const workflowScript = Object.keys(testScripts).find((k) => k === "test:bdd:workflows" || k === "test:e2e:workflows") ?? allScript;
     items.push({ kind: "script", label: "All Tests", arg: allScript });
     for (const dir of featureModules.modules) {
       const label = dir.replace(/^@/, "");
-      items.push({ kind: "module", label, arg: `@${label.toLowerCase()}` });
+      items.push({ kind: "module", label, arg: `${allScript} --grep @${label}` });
     }
     for (const dir of featureModules.workflows) {
       const label = dir.replace(/^@/, "");
-      items.push({ kind: "workflow", label, arg: `@${label.toLowerCase()}` });
+      items.push({ kind: "workflow", label, arg: `${workflowScript} --grep @${label}` });
     }
     for (const [name, cmd] of Object.entries(testScripts)) {
       if (name === "test:bdd") continue;
@@ -76,19 +82,34 @@ export function RunTestsPalette({
     el?.scrollIntoView({ block: "nearest" });
   }, [activeIdx]);
 
+  const launchRun = useCallback((arg: string): void => {
+    if (launchingArg) return;
+    setLaunchingArg(arg);
+    window.setTimeout(() => {
+      void onRun(arg, { headed, integrated });
+    }, 360);
+  }, [headed, integrated, launchingArg, onRun]);
+
   const handleKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => Math.min(i + 1, items.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => Math.max(i - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (items[activeIdx]) onRun(items[activeIdx].arg); }
-    else if (e.key === "Escape") { onClose(); }
-  }, [items, activeIdx, onRun, onClose]);
+    else if (e.key === "Enter") { e.preventDefault(); if (items[activeIdx]) launchRun(items[activeIdx].arg); }
+    else if (e.key === "Escape" && !launchingArg) { onClose(); }
+  }, [items, activeIdx, launchRun, onClose, launchingArg]);
 
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] pointer-events-none">
-        <div className="operator-panel operator-command pointer-events-auto border shadow-2xl flex flex-col overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-operator-line">
+        <motion.div
+          variants={paletteVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={motionTransition}
+        >
+          <div className="operator-panel operator-command pointer-events-auto border shadow-2xl flex flex-col overflow-hidden">
+          <div className="operator-command-head">
             <span className="operator-label">Run</span>
             <input
               ref={inputRef}
@@ -97,16 +118,16 @@ export function RunTestsPalette({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKey}
               placeholder="Search modules, workflows, scripts…"
-              className="flex-1 bg-transparent text-stone-200 text-[13.5px] placeholder-stone-600 outline-none"
+              className="operator-command-input"
               autoFocus
             />
             {query && (
-              <button onClick={() => setQuery("")} className="operator-muted hover:text-stone-400 text-xs">Clear</button>
+              <button onClick={() => setQuery("")} disabled={Boolean(launchingArg)} className="operator-command-clear">Clear</button>
             )}
-            <kbd className="operator-muted text-[10px] font-mono border border-operator-line px-1 py-0.5">esc</kbd>
+            <kbd className="operator-command-kbd">esc</kbd>
           </div>
 
-          <div ref={listRef} className="max-h-72 overflow-y-auto scrollable py-1">
+          <div ref={listRef} className="operator-command-list scrollable">
             {items.length === 0 ? (
               <p className="px-4 py-6 operator-muted text-xs text-center">No matches — type a tag like @auth or a script name</p>
             ) : (
@@ -117,21 +138,26 @@ export function RunTestsPalette({
                   <button
                     key={`${item.kind}-${item.arg}`}
                     data-idx={idx}
-                    onClick={() => onRun(item.arg)}
+                    onClick={() => launchRun(item.arg)}
                     onMouseEnter={() => setActiveIdx(idx)}
-                    className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${meta.rowHover} ${isActive ? "bg-operator-field" : ""}`}
+                    className="operator-command-item"
+                    data-active={isActive}
+                    data-launching={launchingArg === item.arg}
+                    disabled={Boolean(launchingArg)}
                   >
-                    <span className={`operator-label flex-shrink-0 ${item.kind === "module" ? "text-brand-400" : item.kind === "workflow" ? "text-brand-300" : item.kind === "custom" ? "text-amber-400" : "text-stone-500"}`}>
+                    <span className="operator-command-kind">
                       {meta.code}
                     </span>
-                    <span className={`flex-1 text-[13px] font-medium truncate ${isActive ? "text-stone-50" : "text-stone-300"}`}>
+                    <span className="operator-command-name">
                       {item.label}
                     </span>
-                    <span className={`operator-badge ${meta.badgeCls}`}>
-                      {meta.badge}
+                    <span className="operator-command-arg">
+                      {item.arg}
                     </span>
-                    {isActive && (
-                      <kbd className="operator-muted text-[10px] font-mono">enter</kbd>
+                    {launchingArg === item.arg ? (
+                      <span className="operator-command-launching"><span /> Preparing</span>
+                    ) : isActive && (
+                      <kbd className="operator-command-enter">Enter</kbd>
                     )}
                   </button>
                 );
@@ -139,13 +165,38 @@ export function RunTestsPalette({
             )}
           </div>
 
-          <div className="px-4 py-2 border-t border-operator-line flex items-center gap-3 operator-muted text-[10px]">
+          <div className="operator-command-footer">
             <span><kbd className="font-mono">↑↓</kbd> navigate</span>
             <span><kbd className="font-mono">↵</kbd> run</span>
             <span><kbd className="font-mono">esc</kbd> close</span>
-            <span className="ml-auto">or type a custom filter: @tag · --grep · --project</span>
+            <label className="operator-command-headed">
+              <input
+                type="checkbox"
+                checked={headed}
+                onChange={(event) => {
+                  setHeaded(event.currentTarget.checked);
+                  if (event.currentTarget.checked) setIntegrated(false);
+                }}
+                disabled={Boolean(launchingArg) || integrated}
+              />
+              visible browser
+            </label>
+            <label className="operator-command-headed" title="Run through the Desktop integrated browser via CDP. Forces one worker.">
+              <input
+                type="checkbox"
+                checked={integrated}
+                onChange={(event) => {
+                  setIntegrated(event.currentTarget.checked);
+                  if (event.currentTarget.checked) setHeaded(false);
+                }}
+                disabled={Boolean(launchingArg)}
+              />
+              integrated browser
+            </label>
+            <span className="ml-auto">{launchingArg ? "Preparing run view..." : "or type a custom filter: @tag · --grep · --project"}</span>
           </div>
-        </div>
+          </div>
+        </motion.div>
       </div>
     </>
   );
