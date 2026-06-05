@@ -44,6 +44,7 @@ export interface AbortHandle {
 export interface GenerateCallbacks {
   onToken: (token: string) => void;
   onLog?: (line: string) => void;
+  onOpenCodeSession?: (info: { sessionId: string; baseUrl: string }) => void;
   onToolEnd?: (toolName: string, durationMs: number) => void;
   onStepFinish?: (info: { stepNumber: number; totalTokens: number; toolCalls: string[] }) => void;
 }

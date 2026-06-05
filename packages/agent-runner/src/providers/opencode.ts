@@ -1,58 +1,31 @@
 import type { LanguageModel } from "ai";
 import { spawn } from "child_process";
+import { createOpenCodeAcpJsonRpcWriter } from "./opencode-acp-json-rpc";
+import {
+  extractOpenCodeText,
+  fetchOpenCodeApi,
+  fetchOpenCodeProviderEndpoint,
+  isOpenCodeHealthy,
+  type OpenCodeMessageResponse,
+} from "./opencode-http";
+import {
+  normalizeModelId,
+  pickPreferredProvider,
+  resolveProviderId,
+} from "./opencode-model-selection";
+import {
+  clearCachedOpenCodeSession,
+  ensureOpenCodeSession,
+  getCachedOpenCodeSession,
+} from "./opencode-session-cache";
+import { streamOpenCodeSseEvents } from "./opencode-sse-events";
 import type { LLMProvider, ProviderConfig, DirectGenerateResult, AbortHandle, GenerateCallbacks } from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Session lifecycle — reused across pipeline steps                   */
 /* ------------------------------------------------------------------ */
 
-let _sessionId: string | null = null;
-let _sessionBaseUrl: string | null = null;
-let _sessionProviderId: string | null = null;
-let _sessionModelId: string | null = null;
 let _activeSseController: AbortController | null = null;
-const OPENCODE_REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
-
-/**
- * Ensure a session exists for the given server/project.
- * Reuses the existing session if one is still alive, avoiding
- * create/delete overhead between tool-call steps and keeping
- * the model's conversation context intact.
- */
-async function ensureSession(
-  baseUrl: string,
-  providerID: string,
-  modelId: string | undefined,
-  variant: string | undefined,
-  directory?: string,
-): Promise<string> {
-  if (
-    _sessionId &&
-    _sessionBaseUrl === baseUrl &&
-    _sessionProviderId === providerID &&
-    _sessionModelId === (modelId ?? null)
-  ) {
-    return _sessionId;
-  }
-
-  const sessionPath = directory
-    ? `/session?directory=${encodeURIComponent(directory)}`
-    : "/session";
-  const sessionRes = await apiFetch(baseUrl, sessionPath, {
-    method: "POST",
-    body: JSON.stringify({
-      title: "sw-opencode",
-      agent: "build",
-      model: modelId ? { id: modelId, providerID, variant: variant || "low" } : undefined,
-    }),
-  });
-  _sessionId = ((await sessionRes.json()) as { id: string }).id;
-  _sessionBaseUrl = baseUrl;
-  _sessionProviderId = providerID;
-  _sessionModelId = modelId ?? null;
-
-  return _sessionId;
-}
 
 /** Abort any in-flight SSE stream immediately. */
 export function abortStream(): void {
@@ -64,9 +37,10 @@ export function abortStream(): void {
 
 /** Send an interrupt message to the current session (for interrupt button). */
 export async function interruptSession(message: string): Promise<void> {
-  if (_sessionId && _sessionBaseUrl) {
+  const session = getCachedOpenCodeSession();
+  if (session) {
     try {
-      await apiFetch(_sessionBaseUrl, `/session/${_sessionId}/prompt_async`, {
+      await fetchOpenCodeApi(session.baseUrl, `/session/${session.id}/prompt_async`, {
         method: "POST",
         body: JSON.stringify({
           parts: [{ type: "text", text: message }],
@@ -79,16 +53,14 @@ export async function interruptSession(message: string): Promise<void> {
 /** Delete the cached session if one exists. */
 export async function cleanupSession(): Promise<void> {
   abortStream();
-  if (_sessionId && _sessionBaseUrl) {
+  const session = getCachedOpenCodeSession();
+  if (session) {
     try {
-      await apiFetch(_sessionBaseUrl, `/session/${_sessionId}`, {
+      await fetchOpenCodeApi(session.baseUrl, `/session/${session.id}`, {
         method: "DELETE",
       });
     } catch { /* ignore */ }
-    _sessionId = null;
-    _sessionBaseUrl = null;
-    _sessionProviderId = null;
-    _sessionModelId = null;
+    clearCachedOpenCodeSession();
   }
 }
 
@@ -96,116 +68,8 @@ export async function cleanupSession(): Promise<void> {
 /*  Internal helpers — opencode server HTTP API                        */
 /* ------------------------------------------------------------------ */
 
-interface Part {
-  type: string;
-  text?: string;
-}
-
-interface MessageResponse {
-  info: {
-    modelID: string;
-    tokens: { total: number; input: number; output: number };
-    finish: string;
-  };
-  parts: Part[];
-}
-
-interface ProviderEndpointResponse {
-  all?: Array<{ id: string; models?: Record<string, unknown> }>;
-  default: Record<string, string>;
-  connected: string[];
-}
-
-function isPreferredGptProvider(providerId: string): boolean {
-  const id = providerId.toLowerCase();
-  return id.includes("opencode") || id.includes("openai") || id.includes("chatgpt");
-}
-
-function pickPreferredProvider(data: ProviderEndpointResponse): string | undefined {
-  return (
-    data.connected.find((providerId) => isPreferredGptProvider(providerId) && data.default[providerId]) ??
-    data.connected.find((providerId) => data.default[providerId]) ??
-    data.connected[0]
-  );
-}
-
 function createMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-function normalizeModelId(modelId: string | undefined): string | undefined {
-  if (!modelId) return undefined;
-  const normalized = modelId.trim().toLowerCase().replace(/\s+/g, "-");
-  if (normalized === "gpt-5.5-fast") return "gpt-5.5-fast";
-  if (normalized === "gpt-5.5") return "gpt-5.5";
-  return modelId;
-}
-
-async function apiFetch(
-  baseUrl: string,
-  path: string,
-  init?: RequestInit
-): Promise<Response> {
-  const res = await fetch(`${baseUrl}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers as Record<string, string>) },
-    signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
-    ...init,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`opencode API ${res.status} ${path}: ${text}`);
-  }
-  return res;
-}
-
-function extractText(parts: Part[]): string {
-  return parts.filter((p) => p.type === "text").map((p) => p.text ?? "").join("");
-}
-
-/* ------------------------------------------------------------------ */
-/*  SSE event stream — parse Server-Sent Events from /global/event    */
-/* ------------------------------------------------------------------ */
-
-async function* sseEventStream(
-  url: string,
-  signal?: AbortSignal
-): AsyncGenerator<{ event?: string; data: unknown }> {
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`SSE ${response.status}: ${response.statusText}`);
-  const body = response.body;
-  if (!body) throw new Error("SSE response has no body");
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-
-    for (const block of parts) {
-      if (!block.trim()) continue;
-      const lines = block.split("\n");
-      let event: string | undefined;
-      let dataStr = "";
-
-      for (const line of lines) {
-        if (line.startsWith("event: ")) event = line.slice(7);
-        else if (line.startsWith("data: ")) dataStr = line.slice(6);
-      }
-
-      if (dataStr) {
-        try {
-          yield { event, data: JSON.parse(dataStr) };
-        } catch { /* skip malformed JSON */ }
-      }
-    }
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -214,12 +78,7 @@ async function* sseEventStream(
 
 /** Check if an opencode server is healthy. */
 export async function healthCheck(baseUrl: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${baseUrl}/global/health`, { signal: AbortSignal.timeout(5000) });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  return isOpenCodeHealthy(baseUrl);
 }
 
 /** Detect the default model from a running opencode server. */
@@ -228,66 +87,20 @@ export async function detectModel(baseUrl: string): Promise<{
   providerId: string;
 } | null> {
   try {
-    const res = await fetch(`${baseUrl}/provider`, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-    const data = (await res.json()) as ProviderEndpointResponse;
+    const data = await fetchOpenCodeProviderEndpoint(baseUrl);
+    if (!data) {
+      return null;
+    }
+
     const pid = pickPreferredProvider(data);
-    if (!pid) return null;
+    if (!pid) {
+      return null;
+    }
+
     return { modelId: data.default[pid], providerId: pid };
   } catch {
     return null;
   }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Provider model→ID mapping — discover from /provider once per base  */
-/* ------------------------------------------------------------------ */
-
-let _cachedProviderMap: Record<string, string> | null = null;
-let _cachedProviderModels: Record<string, string[]> | null = null;
-let _cachedConnectedProviders: string[] | null = null;
-let _cachedBaseUrl: string | null = null;
-
-async function resolveProviderId(baseUrl: string, modelId?: string): Promise<string> {
-  if (!_cachedProviderMap || _cachedBaseUrl !== baseUrl) {
-    try {
-      const res = await fetch(`${baseUrl}/provider`, { signal: AbortSignal.timeout(10_000) });
-      if (res.ok) {
-        const data = (await res.json()) as ProviderEndpointResponse;
-        _cachedProviderMap = data.default;
-        _cachedConnectedProviders = data.connected;
-        _cachedProviderModels = Object.fromEntries(
-          (data.all ?? []).map((provider) => [provider.id, Object.keys(provider.models ?? {})])
-        );
-        _cachedBaseUrl = baseUrl;
-      }
-    } catch { /* fall through */ }
-  }
-  if (!_cachedProviderMap) return "";
-
-  const connected = _cachedConnectedProviders ?? [];
-
-  // If a specific model was requested, only select providers OpenCode reports as connected.
-  if (modelId) {
-    for (const [pid, model] of Object.entries(_cachedProviderMap).filter(([pid]) => connected.includes(pid))) {
-      if (model === modelId) return pid;
-    }
-    for (const [pid, models] of Object.entries(_cachedProviderModels ?? {}).filter(([pid]) => connected.includes(pid))) {
-      if (models.includes(modelId)) return pid;
-    }
-    const existsButDisconnected = Object.values(_cachedProviderModels ?? {}).some((models) => models.includes(modelId));
-    if (existsButDisconnected) {
-      throw new Error(`OpenCode model "${modelId}" is not available on a connected provider. Connected providers: ${connected.join(", ") || "none"}.`);
-    }
-  }
-
-  // Prefer OpenCode Zen/OpenAI/ChatGPT when no exact model/provider match is available.
-  const connectedDefaults = Object.entries(_cachedProviderMap).filter(([pid]) => connected.includes(pid));
-  const openAiEntry = connectedDefaults.find(([pid]) => isPreferredGptProvider(pid));
-  if (openAiEntry) return openAiEntry[0];
-
-  const first = connectedDefaults[0] ?? Object.entries(_cachedProviderMap)[0];
-  return first?.[0] ?? "";
 }
 
 /* ------------------------------------------------------------------ */
@@ -349,7 +162,7 @@ async function sendToOpenCode(
   variant: string | undefined,
   directory?: string,
 ): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  const sessionId = await ensureSession(baseUrl, providerID, modelId, variant, directory);
+  const sessionId = await ensureOpenCodeSession(baseUrl, providerID, modelId, variant, directory);
 
   const body: Record<string, unknown> = {
     messageID: createMessageId(),
@@ -362,14 +175,14 @@ async function sendToOpenCode(
     ? `/session/${sessionId}/message?directory=${encodeURIComponent(directory)}`
     : `/session/${sessionId}/message`;
 
-  const msgRes = await apiFetch(baseUrl, messagePath, {
+  const msgRes = await fetchOpenCodeApi(baseUrl, messagePath, {
     method: "POST",
     body: JSON.stringify(body),
   });
-  const result = (await msgRes.json()) as MessageResponse;
+  const result = (await msgRes.json()) as OpenCodeMessageResponse;
 
   return {
-    text: extractText(result.parts),
+    text: extractOpenCodeText(result.parts),
     inputTokens: result.info.tokens.input,
     outputTokens: result.info.tokens.output,
   };
@@ -391,14 +204,14 @@ async function openCodeStreamFromEvents(
   const sseAbortController = new AbortController();
   _activeSseController = sseAbortController;
 
-  const eventIter = sseEventStream(`${baseUrl}/event`, sseAbortController.signal);
+  const eventIter = streamOpenCodeSseEvents(`${baseUrl}/event`, sseAbortController.signal);
   const iter = eventIter[Symbol.asyncIterator]();
 
   // Wait for initial server.connected event (confirms SSE is up)
   await iter.next();
 
   // Create or reuse session in the correct project directory
-  const sessionId = await ensureSession(baseUrl, providerID, modelId, variant, directory);
+  const sessionId = await ensureOpenCodeSession(baseUrl, providerID, modelId, variant, directory);
 
   // Send message asynchronously — returns 204 immediately
   const messageID = createMessageId();
@@ -413,7 +226,7 @@ async function openCodeStreamFromEvents(
   const promptPath = directory
     ? `/session/${sessionId}/prompt_async?directory=${encodeURIComponent(directory)}`
     : `/session/${sessionId}/prompt_async`;
-  await apiFetch(baseUrl, promptPath, {
+  await fetchOpenCodeApi(baseUrl, promptPath, {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -546,14 +359,16 @@ async function generateWithOpenCodeEvents(
   const sseAbortController = new AbortController();
   _activeSseController = sseAbortController;
 
-  const eventIter = sseEventStream(`${baseUrl}/event`, sseAbortController.signal);
+  const eventIter = streamOpenCodeSseEvents(`${baseUrl}/event`, sseAbortController.signal);
   const iter = eventIter[Symbol.asyncIterator]();
 
   try {
     // First event is server.connected; subscribing before prompt_async avoids missing early deltas.
     await iter.next();
 
-    const sessionId = await ensureSession(baseUrl, providerID, modelId, variant, directory);
+    const sessionId = await ensureOpenCodeSession(baseUrl, providerID, modelId, variant, directory);
+    callbacks.onOpenCodeSession?.({ sessionId, baseUrl });
+    callbacks.onLog?.(`[opencode] Session: ${sessionId}`);
     const body: Record<string, unknown> = {
       messageID: createMessageId(),
       agent: "build",
@@ -566,7 +381,7 @@ async function generateWithOpenCodeEvents(
     const promptPath = directory
       ? `/session/${sessionId}/prompt_async?directory=${encodeURIComponent(directory)}`
       : `/session/${sessionId}/prompt_async`;
-    await apiFetch(baseUrl, promptPath, {
+    await fetchOpenCodeApi(baseUrl, promptPath, {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -755,32 +570,30 @@ async function generateWithOpenCodeAcp(
 
     let stdoutBuffer = "";
     let stderrBuffer = "";
-    let nextId = 1;
     let sessionId: string | null = null;
     let text = "";
     let inputTokens = 0;
     let outputTokens = 0;
     let settled = false;
-    const pending = new Map<number, string>();
-
-    const send = (method: string, params: Record<string, unknown>): number => {
-      const id = nextId++;
-      pending.set(id, method);
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-      return id;
-    };
-
-    const respond = (id: number, result: Record<string, unknown>): void => {
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
-    };
+    const jsonRpc = createOpenCodeAcpJsonRpcWriter((line) => {
+      child.stdin.write(`${line}\n`);
+    });
 
     const finish = (err?: Error) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       clearInterval(abortTimer);
-      if (!child.killed) child.kill();
-      if (err) reject(err);
-      else resolve({ text, inputTokens, outputTokens, streamed: true });
+      if (!child.killed) {
+        child.kill();
+      }
+      if (err) {
+        reject(err);
+      }
+      else {
+        resolve({ text, inputTokens, outputTokens, streamed: true });
+      }
     };
 
     const firstPermissionOption = (message: Record<string, unknown>): string => {
@@ -797,7 +610,9 @@ async function generateWithOpenCodeAcp(
         callbacks.onToken(content.text);
       } else if (updateType === "usage_update") {
         const used = update.used as number | undefined;
-        if (used) inputTokens = used;
+        if (used) {
+          inputTokens = used;
+        }
       } else if (updateType === "tool_call") {
         callbacks.onLog?.("[opencode] tool call");
       } else if (updateType && updateType !== "agent_thought_chunk" && updateType !== "available_commands_update") {
@@ -811,22 +626,25 @@ async function generateWithOpenCodeAcp(
 
       if (id !== undefined && method) {
         if (method === "session/request_permission") {
-          respond(id, { outcome: { outcome: "selected", optionId: firstPermissionOption(message) } });
+          jsonRpc.sendResponse(id, { outcome: { outcome: "selected", optionId: firstPermissionOption(message) } });
         } else {
-          respond(id, {});
+          jsonRpc.sendResponse(id, {});
         }
         return;
       }
 
       if (method === "session/update") {
         const params = message.params as { update?: Record<string, unknown> } | undefined;
-        if (params?.update) handleUpdate(params.update);
+        if (params?.update) {
+          handleUpdate(params.update);
+        }
         return;
       }
 
-      if (id === undefined) return;
-      const pendingMethod = pending.get(id);
-      pending.delete(id);
+      if (id === undefined) {
+        return;
+      }
+      const pendingMethod = jsonRpc.takePendingMethod(id);
 
       if (message.error) {
         const error = message.error as { message?: string };
@@ -836,7 +654,7 @@ async function generateWithOpenCodeAcp(
 
       const result = message.result as Record<string, unknown> | undefined;
       if (pendingMethod === "initialize") {
-        send("session/new", { cwd: directory ?? process.cwd(), mcpServers: [] });
+        jsonRpc.sendRequest("session/new", { cwd: directory ?? process.cwd(), mcpServers: [] });
       } else if (pendingMethod === "session/new") {
         sessionId = result?.sessionId as string | null;
         if (!sessionId) {
@@ -844,20 +662,20 @@ async function generateWithOpenCodeAcp(
           return;
         }
         if (modelId) {
-          send("session/set_config_option", {
+          jsonRpc.sendRequest("session/set_config_option", {
             sessionId,
             configId: "model",
             value: `${providerID}/${modelId}`,
           });
         } else {
-          send("session/prompt", {
+          jsonRpc.sendRequest("session/prompt", {
             sessionId,
             prompt: [{ type: "text", text: `${systemPrompt}\n\n${userMessage}` }],
           });
         }
       } else if (pendingMethod === "session/set_config_option") {
         if (sessionId) {
-          send("session/prompt", {
+          jsonRpc.sendRequest("session/prompt", {
             sessionId,
             prompt: [{ type: "text", text: `${systemPrompt}\n\n${userMessage}` }],
           });
@@ -871,7 +689,9 @@ async function generateWithOpenCodeAcp(
     };
 
     const handleLine = (line: string): void => {
-      if (!line.trim()) return;
+      if (!line.trim()) {
+        return;
+      }
       try {
         handleMessage(JSON.parse(line) as Record<string, unknown>);
       } catch {
@@ -880,33 +700,47 @@ async function generateWithOpenCodeAcp(
     };
 
     const abortTimer = setInterval(() => {
-      if (abortHandle?.aborted) finish();
+      if (abortHandle?.aborted) {
+        finish();
+      }
     }, 250);
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBuffer += chunk.toString("utf8");
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) handleLine(line);
+      for (const line of lines) {
+        handleLine(line);
+      }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
       const textChunk = chunk.toString("utf8");
       stderrBuffer += textChunk;
       for (const line of textChunk.split(/\r?\n/)) {
-        if (line.trim()) callbacks.onLog?.(`[opencode] ${line}`);
+        if (line.trim()) {
+          callbacks.onLog?.(`[opencode] ${line}`);
+        }
       }
     });
 
     child.on("error", (err) => finish(err));
     child.on("close", (code) => {
-      if (settled) return;
-      if (stdoutBuffer.trim()) handleLine(stdoutBuffer);
-      if (abortHandle?.aborted) finish();
-      else finish(new Error(`opencode acp exited with code ${code}: ${stderrBuffer.trim()}`));
+      if (settled) {
+        return;
+      }
+      if (stdoutBuffer.trim()) {
+        handleLine(stdoutBuffer);
+      }
+      if (abortHandle?.aborted) {
+        finish();
+      }
+      else {
+        finish(new Error(`opencode acp exited with code ${code}: ${stderrBuffer.trim()}`));
+      }
     });
 
-    send("initialize", {
+    jsonRpc.sendRequest("initialize", {
       protocolVersion: 1,
       clientInfo: { name: "specwright-desktop", version: "0.2.0" },
       clientCapabilities: {
@@ -986,7 +820,21 @@ export const opencodeProvider: LLMProvider = {
     const providerID = config.opencodeProviderId || await resolveProviderId(baseUrl, modelId || undefined);
 
     if (callbacks) {
-      return generateWithOpenCodeAcp(
+      if (process.env.SPECWRIGHT_OPENCODE_TRANSPORT === "acp") {
+        return generateWithOpenCodeAcp(
+          providerID,
+          modelId || undefined,
+          systemPrompt,
+          userMessage,
+          variant,
+          directory,
+          abortHandle,
+          callbacks,
+        );
+      }
+
+      return generateWithOpenCodeEvents(
+        baseUrl,
         providerID,
         modelId || undefined,
         systemPrompt,
@@ -998,7 +846,7 @@ export const opencodeProvider: LLMProvider = {
       );
     }
 
-    const sessionId = await ensureSession(baseUrl, providerID, modelId || undefined, variant, directory);
+    const sessionId = await ensureOpenCodeSession(baseUrl, providerID, modelId || undefined, variant, directory);
 
     const body: Record<string, unknown> = {
       messageID: createMessageId(),
@@ -1011,14 +859,14 @@ export const opencodeProvider: LLMProvider = {
       ? `/session/${sessionId}/message?directory=${encodeURIComponent(directory)}`
       : `/session/${sessionId}/message`;
 
-    const msgRes = await apiFetch(baseUrl, messagePath, {
+    const msgRes = await fetchOpenCodeApi(baseUrl, messagePath, {
       method: "POST",
       body: JSON.stringify(body),
     });
-    const result = (await msgRes.json()) as MessageResponse;
+    const result = (await msgRes.json()) as OpenCodeMessageResponse;
 
     return {
-      text: extractText(result.parts),
+      text: extractOpenCodeText(result.parts),
       inputTokens: result.info.tokens.input,
       outputTokens: result.info.tokens.output,
     };

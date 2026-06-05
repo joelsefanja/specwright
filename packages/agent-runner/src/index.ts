@@ -9,6 +9,20 @@ export type { AiSdkRunOptions } from "./AiSdkRunner";
 
 export { SUPPORTED_PROVIDERS, opencodeHealth, opencodeDetectModel } from "./providers/registry";
 export type { LLMProvider, ProviderConfig, DirectGenerateResult } from "./providers/types";
+export {
+  abortSpecwrightRun,
+  addSpecwrightRunPermission,
+  appendSpecwrightRunLog,
+  createSpecwrightRun,
+  getSpecwrightRun,
+  listSpecwrightRuns,
+  readSpecwrightRunDiff,
+  readSpecwrightRunLog,
+  respondSpecwrightRunPermission,
+  updateSpecwrightRun,
+  writeSpecwrightRunDiff,
+} from "./RunRegistry";
+export type { CreateSpecwrightPermissionInput, CreateSpecwrightRunInput, SpecwrightPermissionRequest, SpecwrightPermissionStatus, SpecwrightRunKind, SpecwrightRunRecord, SpecwrightRunStatus, UpdateSpecwrightRunInput } from "./RunRegistry";
 
 export { PlaywrightMcpClient } from "./PlaywrightMcpClient";
 export type { ExplorationResult, DiscoveredElementGroup, McpToolResult, PlaywrightMcpOptions } from "./PlaywrightMcpClient";

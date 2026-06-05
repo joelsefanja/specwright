@@ -52,6 +52,8 @@ export interface AiSdkRunOptions {
   onToken: (token: string) => void;
   /** Called for log messages */
   onLog?: (line: string) => void;
+  /** Called when an OpenCode-backed run has a concrete session. */
+  onOpenCodeSession?: (info: { sessionId: string; baseUrl: string }) => void;
   /** Called when a tool ends */
   onToolEnd?: (toolName: string, durationMs: number) => void;
   /** Called when a step (LLM turn) finishes, with token usage */
@@ -81,6 +83,7 @@ export class AiSdkRunner {
       maxSteps = 50,
       onToken,
       onLog,
+      onOpenCodeSession,
       onToolEnd,
       onStepFinish,
       projectPath,
@@ -110,7 +113,7 @@ export class AiSdkRunner {
 
     /* ---- Resolve provider via registry (Strategy pattern) ---- */
     const providerName = (process.env.SPECWRIGHT_LLM_PROVIDER ?? "anthropic").toLowerCase();
-    const defaultModel = model;
+    const defaultModel = providerName === "opencode" && !process.env.SPECWRIGHT_MODEL ? "gpt-5.5-fast" : model;
     const env: EnvVars = process.env as unknown as EnvVars;
     const config = buildConfig(env, defaultModel, projectPath);
 
@@ -151,7 +154,7 @@ export class AiSdkRunner {
           systemPrompt,
           userMessage,
           abortHandle as { aborted: boolean },
-          { onToken, onLog, onToolEnd, onStepFinish }
+          { onToken, onLog, onOpenCodeSession, onToolEnd, onStepFinish }
         );
 
         // Blocking direct providers return final text only; streaming providers emit tokens themselves.

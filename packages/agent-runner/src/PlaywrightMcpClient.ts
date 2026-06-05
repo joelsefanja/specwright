@@ -5,6 +5,14 @@
  * directly from code. No prompt engineering needed — the app controls the browser.
  */
 
+import {
+  summarizeAccessibilityTree,
+  type AccessibilityTreeSummary,
+  type DiscoveredElementGroup,
+} from "./accessibilitySnapshotSummary";
+
+export type { DiscoveredElementGroup } from "./accessibilitySnapshotSummary";
+
 // Dynamic import — MCP SDK is ESM-only, agent-runner compiles to CJS.
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
 const dynamicImport = new Function("specifier", "return import(specifier)") as (
@@ -23,12 +31,6 @@ export interface SnapshotElement {
   name: string;
   ref?: string;
   children?: SnapshotElement[];
-}
-
-/** Discovered element group from the accessibility tree */
-export interface DiscoveredElementGroup {
-  role: string;
-  names: string[];
 }
 
 /** Result of a pre-exploration run */
@@ -348,66 +350,8 @@ export class PlaywrightMcpClient {
    * the Playwright MCP accessibility tree reports — we don't hardcode role names.
    * We group elements by role and build a human-readable summary.
    */
-  static summarizeAccessibilityTree(snapshot: string): {
-    groups: DiscoveredElementGroup[];
-    summary: string;
-  } {
-    if (!snapshot) return { groups: [], summary: "No elements discovered." };
-
-    // Playwright MCP snapshot format: "- role \"name\" [ref=sXX]" or "- role [ref=sXX]"
-    // Also handles indented lines like "  - role \"name\" [ref=sXX]"
-    const elementRegex = /^\s*-\s+(\w[\w\s]*?)\s+"([^"]+)"(?:\s+\[ref=\w+\])?/;
-    const unnamedRegex = /^\s*-\s+(\w[\w\s]*?)(?:\s+\[ref=\w+\])?\s*$/;
-
-    const roleMap = new Map<string, string[]>();
-
-    for (const line of snapshot.split("\n")) {
-      const named = line.match(elementRegex);
-      if (named) {
-        const role = named[1].trim().toLowerCase();
-        const name = named[2].trim();
-        if (!roleMap.has(role)) roleMap.set(role, []);
-        const names = roleMap.get(role)!;
-        if (!names.includes(name)) names.push(name);
-        continue;
-      }
-      const unnamed = line.match(unnamedRegex);
-      if (unnamed) {
-        const role = unnamed[1].trim().toLowerCase();
-        if (!roleMap.has(role)) roleMap.set(role, []);
-      }
-    }
-
-    const groups: DiscoveredElementGroup[] = [];
-    const summaryLines: string[] = [];
-
-    // Display order: prioritize interactive/semantic roles, rest follow naturally
-    const priorityRoles = ["heading", "navigation", "button", "link", "textbox", "combobox", "searchbox", "img", "tab", "menuitem"];
-    const orderedRoles = [
-      ...priorityRoles.filter((r) => roleMap.has(r)),
-      ...[...roleMap.keys()].filter((r) => !priorityRoles.includes(r)),
-    ];
-
-    for (const role of orderedRoles) {
-      const names = roleMap.get(role) ?? [];
-      groups.push({ role, names });
-
-      const MAX_DISPLAY = 12;
-      if (names.length > 0) {
-        const displayed = names.slice(0, MAX_DISPLAY).join(", ");
-        const overflow = names.length > MAX_DISPLAY ? ` (+${names.length - MAX_DISPLAY} more)` : "";
-        summaryLines.push(`${role}: ${displayed}${overflow}`);
-      } else {
-        summaryLines.push(`${role}: (unnamed)`);
-      }
-    }
-
-    const totalElements = [...roleMap.values()].reduce((sum, n) => sum + Math.max(n.length, 1), 0);
-    const summary = summaryLines.length > 0
-      ? `Discovered ${totalElements} elements:\n${summaryLines.map((l) => `  - ${l}`).join("\n")}`
-      : `Discovered ${totalElements} elements on page.`;
-
-    return { groups, summary };
+  static summarizeAccessibilityTree(snapshot: string): AccessibilityTreeSummary {
+    return summarizeAccessibilityTree(snapshot);
   }
 
   /**
