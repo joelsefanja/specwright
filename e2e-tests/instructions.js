@@ -5,7 +5,7 @@ export default [
     category: '@Modules',
     subModuleName: [],
     fileName: 'test-goal1',
-    filePath: 'e2e-tests/data/migrations/files/SPECWRIGHT_TODO_SCENARIO_FOR_TESTING.md',
+    filePath: 'e2e-tests/data/migrations/files/SPECWRIGHT_README_FOR_TESTING.md',
     inputs: {},
     explore: true,
     runExploredCases: false,

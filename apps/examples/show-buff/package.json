@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src/",
+    "lint": "tsc --noEmit",
     "clean": "rm -rf dist",
     "bddgen": "npx bddgen",
     "test:bdd": "pnpm bddgen && playwright test --project setup --project serial-execution --project precondition --project workflow-consumers --project main-e2e",

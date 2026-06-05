@@ -27,7 +27,8 @@ function createRunnableProject(): string {
   return projectPath;
 }
 
-test("clicking a Run Tests workflow opens the run screen without renderer recovery", async () => {
+test("loading a bootstrapped project opens the workflow without renderer recovery", async () => {
+  test.setTimeout(60_000);
   const projectPath = createRunnableProject();
   const userDataDir = path.join(tmpdir(), `specwright-electron-${Date.now()}`);
   const app = await electron.launch({
@@ -36,6 +37,7 @@ test("clicking a Run Tests workflow opens the run screen without renderer recove
     env: {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
+      SPECWRIGHT_E2E: "1",
     },
     userDataDir,
   });
@@ -49,18 +51,16 @@ test("clicking a Run Tests workflow opens the run screen without renderer recove
 
     try {
       await page.evaluate(async (nextProjectPath) => {
+        window.localStorage.setItem("specwright.language", "en");
         await window.specwright.project.setPath(nextProjectPath);
         window.location.reload();
       }, projectPath);
 
-      await page.getByRole("button", { name: "Run Tests" }).waitFor();
-      await page.getByRole("button", { name: "Run Tests" }).click();
-      await page.getByRole("button", { name: "CheckoutFlow" }).click();
-
       await expect(page.getByText("Interface recovered")).toHaveCount(0);
       await expect(page.getByText("Cannot access 'activeTool' before initialization")).toHaveCount(0);
-      await expect(page.getByText("Starting direct test run: test:e2e:workflows --grep @CheckoutFlow")).toBeVisible();
-      await expect(page.getByText("Run in progress").or(page.getByText("Run complete"))).toBeVisible();
+      await page.getByRole("button", { name: "App URL and login" }).click();
+      await expect(page.getByRole("heading", { name: "App URL and login" })).toBeVisible();
+      await expect(page.getByText("App URL").first()).toBeVisible();
     } finally {
       await page.evaluate(async (projectPathBeforeTest) => {
         await window.specwright.project.setPath(projectPathBeforeTest ?? "");

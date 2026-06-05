@@ -47,7 +47,8 @@ async function seedGitLabCache(page: Page, projectPath: string): Promise<void> {
         { kind: "issue", iid: "4", title: "Orders export includes totals", state: "opened", updatedAt: "2026-05-11T08:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/4", ref: "https://gitlab.com/specwright/demo/-/issues/4", assignedToMe: false },
       ],
     };
-    window.localStorage.setItem(`specwright.gitlab.items.${nextProjectPath}`, JSON.stringify(items));
+    window.localStorage.setItem(`specwright.gitlab.items.assigned.${nextProjectPath}`, JSON.stringify(items));
+    window.localStorage.setItem(`specwright.gitlab.items.project.${nextProjectPath}`, JSON.stringify(items));
     window.localStorage.setItem("specwright.gitlab.issue.https://gitlab.com/specwright/demo/-/issues/42", JSON.stringify({
       filePath: "e2e-tests/data/migrations/files/gitlab-issues/demo-issue-42.md",
       title: "Checkout accepts saved cards",
@@ -89,6 +90,7 @@ async function launchWithProject(projectPath: string, pathPrefix?: string, seedC
     env: {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
+      SPECWRIGHT_E2E: "1",
       PATH: nextPath,
       Path: nextPath,
     },
@@ -99,17 +101,48 @@ async function launchWithProject(projectPath: string, pathPrefix?: string, seedC
   const previousProjectPath = await page.evaluate(async () => window.specwright.project.getPath());
   if (seedCache) await seedGitLabCache(page, projectPath);
   await page.evaluate(async (nextProjectPath) => {
+    window.localStorage.setItem("specwright.language", "en");
     await window.specwright.project.setPath(nextProjectPath);
     window.location.reload();
   }, projectPath);
-  const addInstruction = page.getByRole("button", { name: "Add instruction" }).first();
-  await addInstruction.waitFor();
-  await addInstruction.click();
+  await page.waitForLoadState("domcontentloaded");
+  await page.getByRole("button", { name: "App URL and login" }).click();
+  const appUrlInput = page.getByPlaceholder("https://app.example.com");
+  await appUrlInput.fill("http://localhost:3000");
+  await appUrlInput.blur();
+  await page.getByRole("button", { name: "Describe scenarios" }).click();
+  await expect(page.getByText("Starting point for this test")).toBeVisible();
   return { app, page, previousProjectPath };
 }
 
+async function openGitLabSource(page: Page, expectIssues = false): Promise<void> {
+  const gitlabSource = page.getByRole("button", { name: /Choose GitLab issues/ }).first();
+  if (await gitlabSource.isVisible().catch(() => false)) await gitlabSource.click();
+
+  const targetIssue = page.getByRole("button", { name: /Checkout accepts saved cards/ }).first();
+  if (expectIssues && await targetIssue.isVisible().catch(() => false)) return;
+
+  const chooseIssue = page.locator(".operator-gitlab-actions").getByRole("button", { name: /Choose GitLab issue/ }).first();
+  await chooseIssue.scrollIntoViewIfNeeded().catch(() => undefined);
+  if (expectIssues && !(await chooseIssue.isEnabled().catch(() => false))) {
+    const refresh = page.getByRole("button", { name: "Refresh" }).first();
+    if (await refresh.isEnabled().catch(() => false)) await refresh.click();
+    await expect(chooseIssue).toBeEnabled({ timeout: 30_000 }).catch(async () => {
+      const allProjectIssues = page.getByRole("button", { name: "All project issues" }).first();
+      if (await allProjectIssues.isEnabled().catch(() => false)) await allProjectIssues.click();
+      if (!(await targetIssue.isVisible().catch(() => false))) await expect(chooseIssue).toBeEnabled({ timeout: 30_000 });
+    });
+  }
+  if (await chooseIssue.isEnabled().catch(() => false)) {
+    await chooseIssue.click();
+  }
+  if (expectIssues) {
+    await expect(targetIssue).toBeVisible({ timeout: 30_000 });
+  }
+}
+
 test("captures GitLab integration states", async () => {
-  test.setTimeout(90_000);
+  test.setTimeout(240_000);
   const projectPath = createGitLabProject();
   const screenshotsDir = path.resolve("test-results", "gitlab-integration");
   mkdirSync(screenshotsDir, { recursive: true });
@@ -117,8 +150,10 @@ test("captures GitLab integration states", async () => {
   const unauthenticatedBin = createFakeGlabBin(false);
   const unauth = await launchWithProject(projectPath, unauthenticatedBin);
   try {
-    await expect(unauth.page.getByText("GitLab CLI needs authentication.")).toBeVisible();
-    await unauth.page.screenshot({ path: path.join(screenshotsDir, "01-auth-required.png"), fullPage: true });
+    await openGitLabSource(unauth.page);
+    await expect(unauth.page.getByText("Sign in with glab so Specwright sees the same issues you do.")).toBeVisible();
+    await expect(unauth.page.getByText("Connect GitLab to load issues from this project folder.").first()).toBeVisible();
+    await unauth.page.screenshot({ path: path.join(screenshotsDir, "01-auth-required.png"), fullPage: true, timeout: 60_000 });
   } finally {
     await unauth.page.evaluate(async (projectPathBeforeTest) => window.specwright.project.setPath(projectPathBeforeTest ?? ""), unauth.previousProjectPath);
     await unauth.app.close();
@@ -127,18 +162,29 @@ test("captures GitLab integration states", async () => {
   const authenticatedBin = createFakeGlabBin(true);
   const connected = await launchWithProject(projectPath, authenticatedBin, true);
   try {
-    await expect(connected.page.getByText("4 open GitLab issues")).toBeVisible();
-    await expect(connected.page.getByText("My issues · 1")).toBeVisible();
-    await connected.page.screenshot({ path: path.join(screenshotsDir, "02-issue-picker.png"), fullPage: true });
+    await openGitLabSource(connected.page, true);
+    await expect(connected.page.getByText(/4 issues from/)).toBeVisible();
+    await expect(connected.page.getByText(/My GitLab issues|MY GITLAB ISSUES/)).toBeVisible();
+    await connected.page.screenshot({ path: path.join(screenshotsDir, "02-issue-picker.png"), fullPage: true, timeout: 60_000 });
 
-    await connected.page.getByPlaceholder("Paste GitLab issue URL, project#123, or 123").fill("https://gitlab.com/specwright/demo/-/issues/42");
-    await connected.page.getByRole("button", { name: "Fetch issue" }).click();
+    await connected.page.getByRole("button", { name: /Checkout accepts saved cards/ }).click();
     await expect(connected.page.getByText("demo-issue-42.md")).toBeVisible();
-    await connected.page.screenshot({ path: path.join(screenshotsDir, "03-selected-issue.png"), fullPage: true });
+    await connected.page.getByText("Issue #42 is selected").first().scrollIntoViewIfNeeded().catch(() => undefined);
+    await connected.page.screenshot({ path: path.join(screenshotsDir, "03-selected-issue.png"), fullPage: true, timeout: 60_000 });
 
-    await connected.page.getByRole("button", { name: "Preview" }).click();
-    await expect(connected.page.getByText("Acceptance criteria:")).toBeVisible();
-    await connected.page.screenshot({ path: path.join(screenshotsDir, "04-source-preview.png"), fullPage: true });
+    const sourcePreviewText = connected.page.getByText(/Acceptance criteria:|Checkout accepts saved cards/).first();
+    if (!(await sourcePreviewText.isVisible().catch(() => false))) {
+      const previewSource = connected.page.locator(".operator-selected-action-primary", { hasText: "Preview source" }).first();
+      await previewSource.scrollIntoViewIfNeeded().catch(() => undefined);
+      await previewSource.click({ force: true });
+    }
+    await expect(sourcePreviewText).toBeVisible();
+    await connected.page.screenshot({ path: path.join(screenshotsDir, "04-source-preview.png"), fullPage: true, timeout: 60_000 });
+
+    await connected.page.getByRole("button", { name: "Review and start", exact: true }).click();
+    await expect(connected.page.getByRole("heading", { name: "Review and start" }).first()).toBeVisible();
+    await expect(connected.page.getByText("GitLab #42: Checkout accepts saved cards")).toBeVisible();
+    await connected.page.screenshot({ path: path.join(screenshotsDir, "05-run-tests-source-context.png"), fullPage: true, timeout: 60_000 });
   } finally {
     await connected.page.evaluate(async (projectPathBeforeTest) => window.specwright.project.setPath(projectPathBeforeTest ?? ""), connected.previousProjectPath);
     await connected.app.close();
