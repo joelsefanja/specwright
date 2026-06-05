@@ -123,6 +123,16 @@ export class OpenCodeService {
 
     throw new Error(spawnError ? `OpenCode could not start: ${spawnError}` : "OpenCode server did not become healthy");
   }
+
+  stop(): void {
+    if (!this.serverProcess) return;
+    this.serverProcess.kill();
+    this.serverProcess = null;
+  }
+
+  isManagedServerRunning(): boolean {
+    return this.serverProcess !== null;
+  }
 }
 
 function delay(ms: number): Promise<void> {

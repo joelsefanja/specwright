@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { cp, lstat, mkdir, symlink } from "fs/promises";
 import { autoUpdater } from "electron-updater";
 import { ConfigService } from "./services/ConfigService";
+import { OpenCodeService } from "./services/OpenCodeService";
 import { ProjectService } from "./services/ProjectService";
 import { RequirementsService } from "./services/RequirementsService";
 import { registerConfigIpc } from "./ipc/config.ipc";
@@ -34,6 +35,7 @@ let mainWindow: BrowserWindow | null = null;
 const activeDevFeedbackProcesses = new Map<string, { kill: () => void }>();
 
 const configService = new ConfigService();
+const openCodeService = new OpenCodeService();
 const projectService = new ProjectService();
 const requirementsService = new RequirementsService(projectService);
 const APP_USER_MODEL_ID = "com.specwright.desktop";
@@ -574,7 +576,7 @@ app.whenReady().then(async () => {
   registerReportIpc();
   registerRunRegistryBridgeHandlers(() => configService.getProjectPath() || undefined);
   registerWindowIpc();
-  registerOpenCodeBridgeHandlers();
+  registerOpenCodeBridgeHandlers(openCodeService);
   registerDevFeedbackIpc();
 
   // Open a URL in the system default browser

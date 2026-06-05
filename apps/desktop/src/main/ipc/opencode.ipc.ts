@@ -1,8 +1,8 @@
 import { ipcMain, app } from "electron";
 import { spawn, type ChildProcess } from "child_process";
 import type { IPty } from "node-pty";
+import type { OpenCodeService } from "../services/OpenCodeService";
 
-let serverProcess: ChildProcess | null = null;
 const attachProcesses = new Map<string, IPty>();
 
 // IPC means Inter-Process Communication. Electron keeps the React renderer
@@ -21,25 +21,10 @@ function buildAttachCommand(baseUrl: string, sessionId: string): string {
   return `opencode attach ${baseUrl} --session ${sessionId}`;
 }
 
-function opencodeCommand(): string {
-  return process.platform === "win32" ? "opencode.cmd" : "opencode";
-}
-
 function isPreferredGptProvider(providerId: string): boolean {
   const id = providerId.toLowerCase();
   return id.includes("opencode") || id.includes("openai") || id.includes("chatgpt");
 }
-
-app.on("before-quit", () => {
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-  }
-  for (const childProcess of attachProcesses.values()) {
-    childProcess.kill();
-  }
-  attachProcesses.clear();
-});
 
 async function fetchJson<T>(url: string, timeout = 5000): Promise<T | null> {
   try {
@@ -51,16 +36,15 @@ async function fetchJson<T>(url: string, timeout = 5000): Promise<T | null> {
   }
 }
 
-async function waitForHealthy(baseUrl: string, attempts = 12): Promise<boolean> {
-  for (let i = 0; i < attempts; i += 1) {
-    const data = await fetchJson<{ healthy: boolean }>(`${baseUrl}/global/health`, 500);
-    if (data?.healthy === true) return true;
-    await new Promise((resolve) => setTimeout(resolve, 300));
-  }
-  return false;
-}
+export function registerOpenCodeBridgeHandlers(openCodeService: OpenCodeService): void {
+  app.on("before-quit", () => {
+    openCodeService.stop();
+    for (const childProcess of attachProcesses.values()) {
+      childProcess.kill();
+    }
+    attachProcesses.clear();
+  });
 
-export function registerOpenCodeBridgeHandlers(): void {
   ipcMain.handle(
     "opencode:health",
     async (
@@ -115,35 +99,11 @@ export function registerOpenCodeBridgeHandlers(): void {
       _event,
       port: number
     ): Promise<{ ok: boolean; error?: string }> => {
-      const baseUrl = `http://127.0.0.1:${port}`;
-      if (await waitForHealthy(baseUrl, 1)) {
-        return { ok: true };
-      }
-      if (serverProcess) {
-        const healthy = await waitForHealthy(baseUrl, 3);
-        return healthy ? { ok: true } : { ok: false, error: "OpenCode server is running but not healthy" };
-      }
       try {
-        serverProcess = spawn(opencodeCommand(), ["serve", "--port", String(port)], {
-          stdio: "ignore",
-          shell: false,
-          windowsHide: true,
-          detached: false,
-        });
-        let spawnError: string | undefined;
-        serverProcess.on("exit", () => {
-          serverProcess = null;
-        });
-        serverProcess.on("error", (error) => {
-          spawnError = error.message;
-          serverProcess = null;
-        });
-        const healthy = await waitForHealthy(baseUrl);
-        if (spawnError) return { ok: false, error: `OpenCode could not start: ${spawnError}` };
-        if (!healthy) return { ok: false, error: "OpenCode server did not become healthy" };
+        await openCodeService.start({ baseUrl: `http://127.0.0.1:${port}` });
         return { ok: true };
       } catch (err) {
-        return { ok: false, error: String(err) };
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
     }
   );
@@ -151,10 +111,7 @@ export function registerOpenCodeBridgeHandlers(): void {
   ipcMain.handle(
     "opencode:stop-server",
     async (): Promise<{ ok: boolean }> => {
-      if (serverProcess) {
-        serverProcess.kill();
-        serverProcess = null;
-      }
+      openCodeService.stop();
       return { ok: true };
     }
   );
@@ -162,7 +119,7 @@ export function registerOpenCodeBridgeHandlers(): void {
   ipcMain.handle(
     "opencode:server-status",
     async (): Promise<{ running: boolean }> => {
-      return { running: serverProcess !== null };
+      return { running: openCodeService.isManagedServerRunning() };
     }
   );
 
