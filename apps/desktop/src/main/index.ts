@@ -569,7 +569,7 @@ app.whenReady().then(async () => {
 
   registerConfigIpc(configService);
   registerProjectIpc(configService, projectService, () => mainWindow);
-  registerPipelineIpc(configService, projectService, () => mainWindow);
+  registerPipelineIpc(configService, projectService, openCodeService, () => mainWindow);
   registerRequirementsIpc(requirementsService, () => mainWindow);
   registerAtlassianIpc();
   registerNetworkIpc();

@@ -78,6 +78,7 @@ async function loadAiSdkRunner(): Promise<AiSdkRunnerModule> {
   return _aiSdkRunnerModule;
 }
 import type { ConfigService } from "../services/ConfigService";
+import { normalizeOpenCodeUrl, type OpenCodeService } from "../services/OpenCodeService";
 import type { ProjectService } from "../services/ProjectService";
 import { getAtlassianAccessToken } from "./atlassian.ipc";
 
@@ -87,7 +88,6 @@ let activeClaudeRunner: any = null;
 let activeStream: any = null;
 let activeTestProcess: ChildProcess | null = null;
 let activeManagedAppProcesses: ChildProcess[] = [];
-let activeOpenCodeServerProcess: ChildProcess | null = null;
 let activeSpecwrightRun: { id: string; projectPath: string; processIds: number[]; appendLog: (line: string) => void; update: (patch: Record<string, unknown>) => void; addPermission: (input: { id: string; toolName: string; toolInput?: Record<string, unknown>; description?: string }) => void; respondPermission: (permissionId: string, allowed: boolean) => Promise<void>; registerProcessId: (processId: number) => void } | null = null;
 let activeTestRunPending = false;
 let activeTestRunAborted = false;
@@ -105,61 +105,6 @@ function sendLog(win: BrowserWindow, line: string): void {
 
 function sendDirectRunUpdate(win: BrowserWindow, patch: Record<string, unknown>): void {
   win.webContents.send("pipeline:direct-run-update", patch);
-}
-
-function opencodeCommand(): string {
-  return process.platform === "win32" ? "opencode.cmd" : "opencode";
-}
-
-function resolveOpenCodeUrl(rawUrl: unknown): { baseUrl: string; port: number } {
-  const fallback = "http://127.0.0.1:18789";
-  const value = typeof rawUrl === "string" && rawUrl.trim() ? rawUrl.trim() : fallback;
-  try {
-    const parsed = new URL(value);
-    return { baseUrl: parsed.origin, port: parsed.port ? parseInt(parsed.port, 10) : 18789 };
-  } catch {
-    return { baseUrl: fallback, port: 18789 };
-  }
-}
-
-async function isOpenCodeHealthy(baseUrl: string): Promise<boolean> {
-  try {
-    const healthRes = await fetch(`${baseUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
-    return healthRes.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function startOpenCodeServer(win: BrowserWindow, projectPath: string | undefined, baseUrl: string, port: number): Promise<void> {
-  if (await isOpenCodeHealthy(baseUrl)) return;
-
-  win.webContents.send("pipeline:log", { line: `[pipeline] Starting OpenCode server on port ${port}…` });
-  const { spawn } = await import("child_process");
-  activeOpenCodeServerProcess = spawn(opencodeCommand(), ["serve", "--port", String(port)], {
-    stdio: "ignore",
-    shell: false,
-    windowsHide: true,
-    detached: false,
-    cwd: projectPath ?? undefined,
-  });
-  let spawnError: string | undefined;
-  activeOpenCodeServerProcess.once("error", (error) => {
-    spawnError = error.message;
-    activeOpenCodeServerProcess = null;
-  });
-  activeOpenCodeServerProcess.once("exit", () => {
-    activeOpenCodeServerProcess = null;
-  });
-  if (activeOpenCodeServerProcess.pid) activeSpecwrightRun?.registerProcessId(activeOpenCodeServerProcess.pid);
-
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (spawnError) break;
-    if (await isOpenCodeHealthy(baseUrl)) return;
-    await new Promise((resolve) => setTimeout(resolve, 400));
-  }
-
-  throw new Error(spawnError ? `OpenCode could not start: ${spawnError}` : "OpenCode server did not become healthy. Install or start OpenCode, then try again.");
 }
 
 async function fetchOpenCodeChildSessionIds(baseUrl: string, sessionId: string): Promise<string[]> {
@@ -392,6 +337,7 @@ function waitForRecordedPermissionResponse(agentRunnerModule: AiSdkRunnerModule,
 export function registerPipelineIpc(
   configService: ConfigService,
   projectService: ProjectService,
+  openCodeService: OpenCodeService,
   getWindow: () => BrowserWindow | null
 ): void {
   ipcMain.handle(
@@ -563,7 +509,7 @@ export function registerPipelineIpc(
             }
           }
 
-          const { baseUrl: ocUrl, port } = resolveOpenCodeUrl(env["SPECWRIGHT_OPENCODE_URL"] || process.env.SPECWRIGHT_OPENCODE_URL);
+          const { baseUrl: ocUrl, port } = normalizeOpenCodeUrl(env["SPECWRIGHT_OPENCODE_URL"] || process.env.SPECWRIGHT_OPENCODE_URL);
           const agentRunnerModule = await loadAiSdkRunner();
           const { AiSdkRunner } = agentRunnerModule;
           if (projectPath) {
@@ -580,7 +526,9 @@ export function registerPipelineIpc(
             sendLog(win, `[orchestrator] OpenCode: opencode attach ${ocUrl}`);
           }
 
-          await startOpenCodeServer(win, projectPath, ocUrl, port);
+          win.webContents.send("pipeline:log", { line: `[pipeline] Checking OpenCode server on port ${port}…` });
+          const startResult = await openCodeService.start({ baseUrl: ocUrl, projectPath });
+          if (startResult.processId) activeSpecwrightRun?.registerProcessId(startResult.processId);
 
           const model = (env["SPECWRIGHT_MODEL"] as string) || process.env.SPECWRIGHT_MODEL || "gpt-5.5-fast";
           process.env.SPECWRIGHT_MODEL = model;
@@ -821,10 +769,9 @@ export function registerPipelineIpc(
       } finally {
         activeClaudeRunner = null;
         activeStream = null;
-        if (activeOpenCodeServerProcess) {
+        if (openCodeService.isManagedServerRunning()) {
           win.webContents.send("pipeline:log", { line: "[pipeline] Stopping OpenCode server" });
-          killProcessTree(activeOpenCodeServerProcess);
-          activeOpenCodeServerProcess = null;
+          openCodeService.stop();
         }
         activeSpecwrightRun = null;
         pendingPermissions.clear();
@@ -867,10 +814,7 @@ export function registerPipelineIpc(
       activeClaudeRunner.abort();
       activeClaudeRunner = null;
       activeStream = null;
-      if (activeOpenCodeServerProcess) {
-        killProcessTree(activeOpenCodeServerProcess);
-        activeOpenCodeServerProcess = null;
-      }
+      openCodeService.stop();
       activeSpecwrightRun = null;
       win?.webContents.send("pipeline:aborted", { fullText: "Aborted by user", userMessage: "" });
       pendingPermissions.clear();
