@@ -1,4 +1,4 @@
-import { dialog, BrowserWindow } from "electron";
+import { dialog, BrowserWindow, type OpenDialogOptions } from "electron";
 
 interface ConfigSchema {
   projectPath: string;
@@ -32,9 +32,9 @@ export class ConfigService {
     // Note: On macOS, file extension filters interfere with directory selection
     // when openFile + openDirectory are combined. Using no filters ensures directories
     // are returned correctly in filePaths.
-    const options = {
+    const options: OpenDialogOptions = {
       title: "Select files or directories to heal",
-      properties: ["openFile", "openDirectory", "multiSelections"] as const,
+      properties: ["openFile", "openDirectory", "multiSelections"],
     };
     const result = parentWindow
       ? await dialog.showOpenDialog(parentWindow, options)
@@ -43,9 +43,9 @@ export class ConfigService {
   }
 
   async pickProjectFolder(parentWindow?: BrowserWindow | null): Promise<string | null> {
-    const options = {
+    const options: OpenDialogOptions = {
       title: "Select or Create Project Folder",
-      properties: ["openDirectory", "createDirectory"] as const,
+      properties: ["openDirectory", "createDirectory"],
     };
     const result = parentWindow
       ? await dialog.showOpenDialog(parentWindow, options)

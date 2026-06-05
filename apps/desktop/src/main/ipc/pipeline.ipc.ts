@@ -70,6 +70,33 @@ interface AiSdkRunOptions {
   projectPath?: string;
 }
 
+interface ClaudePermissionRequest {
+  id: string;
+  tool: string;
+  input?: Record<string, unknown>;
+  description?: string;
+}
+
+interface ClaudeStreamEvent {
+  type: string;
+  text?: string;
+  tool?: string;
+  id?: string;
+  input?: Record<string, unknown>;
+  duration?: number;
+  sessionId?: string;
+  model?: string;
+  status?: string;
+  server?: string;
+  message?: string;
+  description?: string;
+  taskId?: string;
+  summary?: string;
+  toolName?: string;
+  usage?: { durationMs?: number; tools?: number; input?: number; output?: number };
+  result?: { usage: { input: number; output: number }; sessionId: string; duration: number };
+}
+
 let _aiSdkRunnerModule: AiSdkRunnerModule | null = null;
 async function loadAiSdkRunner(): Promise<AiSdkRunnerModule> {
   if (!_aiSdkRunnerModule) {
@@ -486,7 +513,7 @@ export function registerPipelineIpc(
         line: `[pipeline] MCP servers: ${Object.keys(mcpServers).join(", ")}`,
       });
 
-      const projectEnv = projectPath ? projectService.readEnv(projectPath) : {};
+      const projectEnv: Record<string, string | undefined> = projectPath ? projectService.readEnv(projectPath) : {};
       const provider = ((projectEnv["SPECWRIGHT_LLM_PROVIDER"] as string | undefined)
         || process.env.SPECWRIGHT_LLM_PROVIDER
         || "opencode").toLowerCase();
@@ -617,7 +644,7 @@ export function registerPipelineIpc(
             // When skip is OFF, use `prompt` so every tool call goes through the
             // interactive approval flow (the safer default for untrusted runs).
             permissions: payload.skipPermissions ? "auto" : "prompt",
-            onPermission: async (req) => {
+            onPermission: async (req: ClaudePermissionRequest) => {
               activeSpecwrightRun?.addPermission({
                 id: req.id,
                 toolName: req.tool,
@@ -668,31 +695,34 @@ export function registerPipelineIpc(
           activeStream = stream;
 
           fullText = "";
-          for await (const event of stream) {
+          for await (const rawEvent of stream) {
+            const event = rawEvent as unknown as ClaudeStreamEvent;
             switch (event.type) {
               case "text":
-                fullText += event.text;
-                win.webContents.send("pipeline:token", { token: event.text });
+                fullText += event.text ?? "";
+                win.webContents.send("pipeline:token", { token: event.text ?? "" });
                 break;
               case "tool_start": {
-                win.webContents.send("pipeline:tool-start", { toolName: event.tool, toolId: event.id });
+                win.webContents.send("pipeline:tool-start", { toolName: event.tool ?? "tool", toolId: event.id ?? "" });
                 const toolInput = event.input ?? {};
-                if (event.tool === "Write" && toolInput.file_path) {
+                if (event.tool === "Write" && typeof toolInput.file_path === "string") {
                   const fileName = path.basename(String(toolInput.file_path));
                   win.webContents.send("pipeline:log", { line: `[tool] Write → ${fileName}` });
                   win.webContents.send("pipeline:token", { token: `\n📝 Writing \`${fileName}\`...\n` });
-                } else if (event.tool === "Edit" && toolInput.file_path) {
+                } else if (event.tool === "Edit" && typeof toolInput.file_path === "string") {
                   const fileName = path.basename(String(toolInput.file_path));
                   win.webContents.send("pipeline:log", { line: `[tool] Edit → ${fileName}` });
                 } else {
-                  win.webContents.send("pipeline:log", { line: `[tool] ${event.tool} — started` });
+                  win.webContents.send("pipeline:log", { line: `[tool] ${event.tool ?? "tool"} — started` });
                 }
                 break;
               }
-              case "tool_end":
-                win.webContents.send("pipeline:tool-end", { toolName: event.tool, toolId: event.id, durationMs: event.duration });
-                win.webContents.send("pipeline:log", { line: `[tool] ${event.tool} — done (${(event.duration / 1000).toFixed(1)}s)` });
+              case "tool_end": {
+                const duration = event.duration ?? 0;
+                win.webContents.send("pipeline:tool-end", { toolName: event.tool ?? "tool", toolId: event.id ?? "", durationMs: duration });
+                win.webContents.send("pipeline:log", { line: `[tool] ${event.tool ?? "tool"} — done (${(duration / 1000).toFixed(1)}s)` });
                 break;
+              }
               case "session_init":
                 win.webContents.send("pipeline:log", { line: `[pipeline] Session ${event.sessionId} model=${event.model}` });
                 break;
@@ -709,12 +739,12 @@ export function registerPipelineIpc(
                 break;
               case "error":
                 // Show error in chat bubble AND terminal log
-                win.webContents.send("pipeline:token", { token: `\n\n**Blocked by policy:** ${event.message}\n` });
-                win.webContents.send("pipeline:log", { line: `[pipeline] Error: ${event.message}` });
+                win.webContents.send("pipeline:token", { token: `\n\n**Blocked by policy:** ${event.message ?? "Unknown error"}\n` });
+                win.webContents.send("pipeline:log", { line: `[pipeline] Error: ${event.message ?? "Unknown error"}` });
                 break;
               case "task_start":
-                win.webContents.send("pipeline:log", { line: `[agent] ${event.description} — started` });
-                win.webContents.send("pipeline:tool-start", { toolName: event.description, toolId: event.taskId });
+                win.webContents.send("pipeline:log", { line: `[agent] ${event.description ?? "Task"} — started` });
+                win.webContents.send("pipeline:tool-start", { toolName: event.description ?? "Task", toolId: event.taskId ?? "" });
                 break;
               case "task_progress":
                 // Show AI-generated summary in chat so user sees activity
@@ -741,13 +771,13 @@ export function registerPipelineIpc(
               }
               case "done":
                 // Only save sessionId for resume if API was actually called (not hook-blocked)
-                if (event.result.usage.input > 0 || event.result.usage.output > 0) {
+                if (event.result && (event.result.usage.input > 0 || event.result.usage.output > 0)) {
                   lastSessionId = event.result.sessionId;
                 }
                 // Cost / token breakdown temporarily hidden from the pipeline terminal.
                 // Re-enable by restoring the full line below.
                 win.webContents.send("pipeline:log", {
-                  line: `[pipeline] Done — ${event.result.duration}ms`,
+                  line: `[pipeline] Done — ${event.result?.duration ?? 0}ms`,
                   // line: `[pipeline] Done — ${event.result.duration}ms, cost $${event.result.cost.toFixed(4)}, tokens: ${event.result.usage.input}in/${event.result.usage.output}out`,
                 });
                 break;
