@@ -32,7 +32,10 @@ test("Windows command shim uses opencode.cmd", () => {
 
 test("start returns clear error when process spawn errors", async () => {
   const child = idleChild();
-  const spawn = vi.fn(() => child);
+  const spawn = vi.fn(() => {
+    queueMicrotask(() => child.emit("error", new Error("spawn ENOENT")));
+    return child;
+  });
   const service = new OpenCodeService({
     fetch: unreachableFetch(),
     spawn,
@@ -40,10 +43,7 @@ test("start returns clear error when process spawn errors", async () => {
     startupTimeoutMs: 20,
   });
 
-  const started = service.start({ projectPath: "C:\\project" });
-  child.emit("error", new Error("spawn ENOENT"));
-
-  await expect(started).rejects.toThrow("OpenCode could not start: spawn ENOENT");
+  await expect(service.start({ projectPath: "C:\\project" })).rejects.toThrow("OpenCode could not start: spawn ENOENT");
 });
 
 test("unhealthy server returns clear error", async () => {

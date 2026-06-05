@@ -5,7 +5,9 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-const spawnMock = vi.fn();
+const { spawnMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+}));
 
 vi.mock("child_process", () => ({
   spawn: spawnMock,

@@ -282,6 +282,7 @@ function OpenCodeAttachPanel({
   const [input, setInput] = useState("");
   const [outputChunks, setOutputChunks] = useState<string[]>([]);
   const [status, setStatus] = useState<AttachStatus>("idle");
+  const [recoverableError, setRecoverableError] = useState<string | null>(null);
 
   const appendOutput = (chunk: string): void => {
     const next = [...outputChunksRef.current, chunk].slice(-400);
@@ -295,7 +296,13 @@ function OpenCodeAttachPanel({
     const currentAttachId = attachIdRef.current;
     const term = terminalRef.current;
     if (!currentAttachId || !term) return;
-    void window.specwright.opencode.resizeAttachStream({ attachId: currentAttachId, cols: term.cols, rows: term.rows });
+    void window.specwright.opencode.resizeAttachStream({ attachId: currentAttachId, cols: term.cols, rows: term.rows })
+      .then((result) => {
+        if (!result.ok) setRecoverableError(isEnglish ? "Terminal resize did not apply. You can keep watching or retry attach." : "Terminalgrootte is niet toegepast. Je kunt blijven meekijken of opnieuw koppelen.");
+      })
+      .catch((error) => {
+        setRecoverableError(`${isEnglish ? "Terminal resize failed" : "Terminalgrootte aanpassen mislukt"}: ${errorMessage(error)}`);
+      });
   };
 
   useEffect(() => {
@@ -328,7 +335,7 @@ function OpenCodeAttachPanel({
         term.onData((data: string) => {
           const currentAttachId = attachIdRef.current;
           if (!currentAttachId) return;
-          void window.specwright.opencode.sendAttachInput({ attachId: currentAttachId, input: data });
+          void sendAttachInput(currentAttachId, data);
         });
         term.open(terminalElRef.current);
         fit.fit();
@@ -384,8 +391,26 @@ function OpenCodeAttachPanel({
     setOutputChunks([]);
     terminalRef.current?.clear();
     setStatus("idle");
+    setRecoverableError(null);
     setInput("");
   }, [run.id, run.opencodeSessionId]);
+
+  const sendAttachInput = async (currentAttachId: string, value: string): Promise<void> => {
+    try {
+      const result = await window.specwright.opencode.sendAttachInput({ attachId: currentAttachId, input: value });
+      if (!result.ok) {
+        const message = result.error ?? (isEnglish ? "OpenCode input could not be sent." : "OpenCode-invoer kon niet worden verzonden.");
+        setRecoverableError(message);
+        appendOutput(`\r\n[Specwright] ${message}\r\n`);
+      } else {
+        setRecoverableError(null);
+      }
+    } catch (error) {
+      const message = `${isEnglish ? "OpenCode input failed" : "OpenCode-invoer mislukt"}: ${errorMessage(error)}`;
+      setRecoverableError(message);
+      appendOutput(`\r\n[Specwright] ${message}\r\n`);
+    }
+  };
 
   useEffect(() => {
     if (!expanded) return;
@@ -411,21 +436,29 @@ function OpenCodeAttachPanel({
     attachIdRef.current = nextAttachId;
     setAttachId(nextAttachId);
     setStatus("starting");
+    setRecoverableError(null);
     outputChunksRef.current = [];
     setOutputChunks([]);
     terminalRef.current?.clear();
     appendOutput(`$ ${attachCommand}\r\n`);
-    const result = await window.specwright.opencode.startAttachStream({
-      attachId: nextAttachId,
-      baseUrl: run.opencodeBaseUrl,
-      sessionId: run.opencodeSessionId,
-      cwd: run.projectPath,
-    });
+    let result: { ok: boolean; attachId?: string; error?: string };
+    try {
+      result = await window.specwright.opencode.startAttachStream({
+        attachId: nextAttachId,
+        baseUrl: run.opencodeBaseUrl,
+        sessionId: run.opencodeSessionId,
+        cwd: run.projectPath,
+      });
+    } catch (error) {
+      result = { ok: false, error: errorMessage(error) };
+    }
     if (!result.ok) {
-      appendOutput(`[Specwright] ${result.error ?? (isEnglish ? "OpenCode attach could not start." : "OpenCode attach kon niet starten.")}\r\n`);
+      const message = result.error ?? (isEnglish ? "OpenCode attach could not start." : "OpenCode attach kon niet starten.");
+      appendOutput(`[Specwright] ${message}\r\n`);
       attachIdRef.current = null;
       setAttachId(null);
       setStatus("error");
+      setRecoverableError(message);
       return;
     }
     setStatus("running");
@@ -433,8 +466,15 @@ function OpenCodeAttachPanel({
 
   const stopAttach = async (): Promise<void> => {
     if (!attachId) return;
-    await window.specwright.opencode.stopAttachStream(attachId);
-    appendOutput(isEnglish ? "\r\n[Specwright] OpenCode attach stopped.\r\n" : "\r\n[Specwright] OpenCode attach gestopt.\r\n");
+    try {
+      await window.specwright.opencode.stopAttachStream(attachId);
+      appendOutput(isEnglish ? "\r\n[Specwright] OpenCode attach stopped.\r\n" : "\r\n[Specwright] OpenCode attach gestopt.\r\n");
+      setRecoverableError(null);
+    } catch (error) {
+      const message = `${isEnglish ? "OpenCode stop failed" : "OpenCode stoppen mislukt"}: ${errorMessage(error)}`;
+      appendOutput(`\r\n[Specwright] ${message}\r\n`);
+      setRecoverableError(message);
+    }
     attachIdRef.current = null;
     setAttachId(null);
     setStatus("stopped");
@@ -445,7 +485,7 @@ function OpenCodeAttachPanel({
     if (!attachId || !input.trim()) return;
     const value = `${input}\n`;
     setInput("");
-    await window.specwright.opencode.sendAttachInput({ attachId, input: value });
+    await sendAttachInput(attachId, value);
   };
 
   const statusLabel = attachStatusLabel(status, isEnglish);
@@ -485,6 +525,7 @@ function OpenCodeAttachPanel({
           {expanded ? (isEnglish ? "Hide output" : "Output verbergen") : (isEnglish ? "Show output" : "Output tonen")}
         </button>
       </div>
+      {recoverableError && <p className="operator-activity-run-error">{recoverableError}</p>}
       {expanded && (
         <div className="operator-activity-attach-terminal">
           <div ref={terminalElRef} className="operator-activity-attach-xterm" />
@@ -522,9 +563,32 @@ function attachStatusLabel(status: AttachStatus, isEnglish: boolean): string {
   return isEnglish ? "ready" : "klaar";
 }
 
+function OpenCodeAttachUnavailable({ isEnglish }: { isEnglish: boolean }): React.JSX.Element {
+  return (
+    <div className="operator-activity-attach-panel" data-status="error">
+      <div className="operator-activity-attach-head">
+        <span className="operator-activity-run-title">
+          <TerminalWindow size={14} weight="duotone" />
+          {isEnglish ? "OpenCode terminal" : "OpenCode-terminal"}
+        </span>
+        <span className="operator-activity-run-status" data-status="error">{isEnglish ? "unavailable" : "niet beschikbaar"}</span>
+      </div>
+      <p className="operator-activity-run-help">
+        {isEnglish
+          ? "OpenCode attach is unavailable because this run did not report both a server URL and session id. The run output and summary remain available."
+          : "OpenCode koppelen is niet beschikbaar omdat deze run geen server-URL en sessie-id heeft gemeld. De run-output en samenvatting blijven beschikbaar."}
+      </p>
+    </div>
+  );
+}
+
 function formatAttachCommand(run: RunRecord): string {
   if (!run.opencodeBaseUrl || !run.opencodeSessionId) return "";
   return `opencode attach ${run.opencodeBaseUrl} --session ${run.opencodeSessionId}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isActiveRun(run: RunRecord): boolean {
