@@ -22,6 +22,10 @@
     "test:component": "vitest run --config vitest/vitest.workspace.ts --project component --passWithNoTests",
     "test:integration": "vitest run --config vitest/vitest.workspace.ts --project integration",
     "test:contrast": "node scripts/check-theme-contrast.mjs",
+    "test:ui-audit": "pnpm run test:ui-audit:package && pnpm run test:ui-audit:electron",
+    "test:ui-audit:package": "pnpm --filter @specwright/ui-audit test:smoke",
+    "test:ui-audit:electron": "playwright test e2e-tests/ui-audit.e2e.spec.ts",
+    "ts:diagnostics": "pnpm --filter @specwright/ui-audit build && specwright-ui-audit ts --project tsconfig.node.diagnostics.json --output test-results/ts-diagnostics.json",
     "test:report": "node scripts/open-test-report.cjs",
     "report:allure": "node scripts/open-test-report.cjs",
     "preview": "electron-vite preview",
@@ -69,7 +73,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "1.59.1",
+    "@specwright/ui-audit": "workspace:*",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
