@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Cpu } from "@phosphor-icons/react";
+import { ModalShell, SettingsRow, StatusPill } from "../ui";
 
 interface ModelOption {
   providerId: string;
@@ -127,18 +129,31 @@ export function OpenCodeConfigModal({
   }, [models, modelSearch]);
   const groupedModels = groupModels(filteredModels);
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="operator-panel operator-modal-sm border shadow-2xl max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
+  const footer = (
+    <>
+      <button type="button" onClick={onClose} className="operator-button">
+        Cancel
+      </button>
+      <button
+        type="button"
+        onClick={() => onSave(url, normalizeModel(selectedModel), variant)}
+        disabled={!selectedModel}
+        className="operator-button-primary disabled:opacity-40"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-operator-line">
-          <h2 className="text-stone-200 text-sm font-semibold">OpenCode model</h2>
-          <button onClick={onClose} className="operator-muted hover:text-stone-300 text-xs">Close</button>
-        </div>
+        Save model
+      </button>
+    </>
+  );
 
-        <div className="px-4 py-3 space-y-4">
+  return (
+    <ModalShell
+      title="OpenCode model"
+      description="Choose the local AI model Specwright uses for test generation. The recommended setup is already selected."
+      icon={<Cpu size={18} weight="duotone" />}
+      size="md"
+      footer={footer}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+    >
           <div className="space-y-2">
             <label className="operator-control-label">Model</label>
             <input
@@ -171,12 +186,11 @@ export function OpenCodeConfigModal({
             </div>
           </div>
 
-          {status === "connected" && selectedModel && (
-            <p className="text-[var(--sw-success)] text-xs flex items-center gap-1">
-              <span className="operator-status-dot bg-[var(--sw-success)]" />
-              Selected: {selectedModel} / {variant}
-            </p>
-          )}
+          <SettingsRow
+            title="Selected setup"
+            description={`${selectedModel || "No model selected"} / ${variantLabel(variant)}`}
+            control={<StatusPill status={status === "connected" ? "success" : status === "error" ? "warning" : "muted"} dot>{statusLabel(status)}</StatusPill>}
+          />
 
           <details className="operator-inline-panel">
             <summary className="operator-control-label cursor-pointer">Connection</summary>
@@ -191,37 +205,38 @@ export function OpenCodeConfigModal({
           </details>
 
           <div>
-            <label className="operator-control-label">Variant</label>
+            <label className="operator-control-label">Reasoning depth</label>
             <select
               value={variant}
               onChange={(e) => setVariant(e.target.value)}
               className="operator-select w-full"
             >
-              <option value="minimal">minimal</option>
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-              <option value="xhigh">xhigh</option>
+              <option value="minimal">Quick</option>
+              <option value="low">Balanced</option>
+              <option value="medium">Careful</option>
+              <option value="high">Thorough</option>
+              <option value="xhigh">Maximum</option>
             </select>
+            <p className="operator-field-help">Higher depth gives Specwright more time to reason before editing tests.</p>
           </div>
-        </div>
-
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-operator-line">
-          <button
-            onClick={onClose}
-            className="operator-button"
-          >
-            Cancel
-          </button>
-          <button
-        onClick={() => onSave(url, normalizeModel(selectedModel), variant)}
-            disabled={!selectedModel}
-            className="operator-button-primary disabled:opacity-40"
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   );
+}
+
+function statusLabel(status: "idle" | "detecting" | "connected" | "error"): string {
+  if (status === "connected") return "Connected";
+  if (status === "detecting") return "Checking";
+  if (status === "error") return "Using fallback";
+  return "Not checked";
+}
+
+function variantLabel(variant: string): string {
+  const labels: Record<string, string> = {
+    minimal: "Quick",
+    low: "Balanced",
+    medium: "Careful",
+    high: "Thorough",
+    xhigh: "Maximum",
+  };
+  return labels[variant] ?? variant;
 }

@@ -102,7 +102,7 @@ const PHASES: Phase[] = [
   { id: 2,  label: "Detection & Routing",      agentName: null,                        status: "pending", startedAt: null, durationMs: null },
   { id: 3,  label: "Input Processing",          agentName: "input-processor",           status: "pending", startedAt: null, durationMs: null },
   { id: 4,  label: "Exploration & Planning",   agentName: "playwright-test-planner",   status: "pending", startedAt: null, durationMs: null },
-  { id: 5,  label: "Exploration Validation",   agentName: "execution-manager",         status: "pending", startedAt: null, durationMs: null },
+  { id: 5,  label: "Seed Validation",          agentName: "execution-manager",         status: "pending", startedAt: null, durationMs: null },
   { id: 6,  label: "User Approval",            agentName: null,                        status: "pending", startedAt: null, durationMs: null },
   { id: 7,  label: "BDD Generation",           agentName: "bdd-generator",             status: "pending", startedAt: null, durationMs: null },
   { id: 8,  label: "Test Execution & Healing", agentName: "execution-manager",         status: "pending", startedAt: null, durationMs: null },
@@ -113,7 +113,7 @@ const PHASES: Phase[] = [
 /** Derived constants — all phase logic should reference these, not hardcoded numbers. */
 export const PHASE_COUNT = PHASES.length;
 export const MAX_PHASE_ID = PHASES[PHASES.length - 1].id;
-/** The phase where BDD generation starts — "Run Tests" is available once this phase is done. */
+/** The phase where test creation starts — "Run Tests" is available once this phase is done. */
 export const BDD_GENERATION_PHASE_ID = PHASES.find((p) => p.label === "BDD Generation")!.id;
 
 function makeId(): string {

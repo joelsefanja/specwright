@@ -3,7 +3,7 @@ import { useConfigStore } from "@renderer/store/config.store";
 
 export function useReportAvailability() {
   const { projectPath } = useConfigStore();
-  const [reportAvailability, setReportAvailability] = useState({ playwright: false, bdd: false });
+  const [reportAvailability, setReportAvailability] = useState({ playwright: false, bdd: false, allure: false });
   const [showReportMenu, setShowReportMenu] = useState(false);
   const reportMenuRef = useRef<HTMLDivElement>(null);
 

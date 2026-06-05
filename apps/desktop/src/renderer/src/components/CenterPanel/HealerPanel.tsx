@@ -5,16 +5,16 @@ import { ContextHeader, GuidanceRail } from "../common/Discoverability";
 
 const HEALER_GUIDE = [
   {
-    label: "Scope the repair",
-    description: "Add files when the failure is known, or leave empty for project-wide diagnosis.",
+    label: "Kies wat stuk is",
+    description: "Voeg bestanden toe als je weet waar het misgaat. Laat leeg voor alle fouten.",
   },
   {
-    label: "Run and inspect",
-    description: "The healer runs tests, reads output, and identifies selector, timeout, data, or assertion failures.",
+    label: "Laat Specwright controleren",
+    description: "Specwright start de test en zoekt waar het misgaat.",
   },
   {
-    label: "Patch and retry",
-    description: "It updates step definitions and retries up to 3 times before reporting what remains.",
+    label: "Verbeter en probeer opnieuw",
+    description: "Specwright past de test aan en probeert opnieuw.",
   },
 ];
 
@@ -85,21 +85,21 @@ export default function HealerPanel(): React.JSX.Element {
       {/* Content — scrollable */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-4 bg-operator-canvas" data-tab-staging="true">
         <ContextHeader
-          eyebrow="Repair Tests"
-          title="Repair failing tests with project context"
-          description="Select specific files when you know what failed, or leave the target empty to let Specwright inspect the project failures."
+          eyebrow="Test verbeteren"
+          title="Herstel tests die niet slagen"
+          description="Kies bestanden als je weet waar het misgaat. Laat leeg als Specwright alle fouten mag bekijken."
         />
         <GuidanceRail
-          title="Focused repair loop"
-          description="Use this after tests exist and a run fails. For new coverage, go back to Create Tests and generate from an instruction."
+          title="Wanneer gebruik je dit?"
+          description="Gebruik dit nadat een bestaande test faalt. Voor een nieuwe test ga je terug naar Test maken."
           items={HEALER_GUIDE}
         />
         {/* Files to heal */}
         <div>
           <label className="operator-control-label">
-            Files to Heal
+            Bestanden om te herstellen
           </label>
-          <p className="operator-field-help mb-3">Select test files or directories with failing tests. Leave empty to heal all failures.</p>
+          <p className="operator-field-help mb-3">Kies bestanden met fouten. Laat leeg om alle fouten te herstellen.</p>
 
           {/* Path chips */}
           {paths.length > 0 && (
@@ -121,7 +121,7 @@ export default function HealerPanel(): React.JSX.Element {
                       disabled={isRunning}
                       className="operator-muted hover:text-[var(--sw-danger)] text-xs transition-colors flex-shrink-0 disabled:opacity-40"
                     >
-                      Remove
+                      Verwijderen
                     </button>
                   </div>
                 );
@@ -134,21 +134,21 @@ export default function HealerPanel(): React.JSX.Element {
             disabled={isRunning}
             className="operator-button w-full justify-center border-dashed py-2"
           >
-            Add file or directory
+             Bestand of map toevoegen
           </button>
         </div>
 
         {/* Instructions */}
         <div>
           <label className="operator-control-label">
-            Instructions <span className="operator-muted font-normal">(optional)</span>
+            Extra uitleg <span className="operator-muted font-normal">(optioneel)</span>
           </label>
-          <p className="operator-field-help mb-2">Add symptoms the terminal showed, recent UI changes, or constraints the healer should respect.</p>
+          <p className="operator-field-help mb-2">Beschrijf wat je zag misgaan of waar Specwright rekening mee moet houden.</p>
           <textarea
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
             disabled={isRunning}
-            placeholder="Describe what's failing or what to fix…&#10;e.g., &quot;The year tab selectors changed from buttons to links&quot;"
+            placeholder="Voorbeeld: De jaartab is nu een link in plaats van een knop."
             rows={4}
             className="operator-field w-full px-3 py-2 text-[13.5px] placeholder-stone-600 resize-none disabled:opacity-40"
           />
@@ -165,12 +165,12 @@ export default function HealerPanel(): React.JSX.Element {
         >
           {isRunning ? (
             <>
-              <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent animate-spin" />
-              Healing
+              <span className="operator-loading-spinner h-3.5 w-3.5" />
+              Herstellen
             </>
           ) : (
             <>
-              Heal
+              Tests herstellen
             </>
           )}
         </button>

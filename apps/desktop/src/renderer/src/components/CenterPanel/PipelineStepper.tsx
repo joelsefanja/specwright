@@ -75,7 +75,7 @@ export default function PipelineStepper(): React.JSX.Element {
       </div>
 
       {/* Two-column grid of steps */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-1.5">
+      <div className="grid grid-cols-1 gap-x-8 gap-y-1.5 2xl:grid-cols-2">
         {phases.map((phase) => (
           <PhaseStep key={phase.id} phase={phase} />
         ))}

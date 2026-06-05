@@ -109,7 +109,7 @@ export default function TerminalPanel(): React.JSX.Element {
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1">
             <span
-              className={`w-2 h-2 ${
+              className={`h-2 w-2 rounded-full ${
                 status === "running" ? "bg-[var(--sw-accent)] animate-pulse" :
                 status === "error"   ? "bg-[var(--sw-danger)]" :
                 status === "done"    ? "bg-[var(--sw-success)]" :

@@ -12,9 +12,9 @@ export const TOOL_TO_PHASE: Record<string, number> = {
   "playwright-test-planner": 4,
   "playwright-test-generator": 7,
   "bdd-generator": 7,
-  "code-generator": 8,
-  "execution-manager": 9,
-  "playwright-test-healer": 9,
+  "code-generator": 7,
+  "execution-manager": 8,
+  "playwright-test-healer": 8,
   "_review-agent": 10,
 };
 

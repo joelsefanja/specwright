@@ -14,7 +14,6 @@ interface TemplateEntry {
   steps: string[];
   filePath: string;
   suitName: string;
-  jiraURL: string;
   explore: boolean;
   runExploredCases: boolean;
   runGeneratedCases: boolean;
@@ -34,7 +33,6 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       steps: ["Navigate to the home page and explore all interactive elements"],
       filePath: "",
       suitName: "",
-      jiraURL: "",
       explore: true,
       runExploredCases: false,
       runGeneratedCases: false,
@@ -55,7 +53,6 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       ],
       filePath: "",
       suitName: "",
-      jiraURL: "",
       explore: true,
       runExploredCases: false,
       runGeneratedCases: false,
@@ -78,7 +75,6 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       ],
       filePath: "",
       suitName: "",
-      jiraURL: "",
       explore: true,
       runExploredCases: false,
       runGeneratedCases: false,
@@ -100,7 +96,6 @@ function getBuiltInTemplates(baseUrl: string): TemplateEntry[] {
       ],
       filePath: "",
       suitName: "",
-      jiraURL: "",
       explore: true,
       runExploredCases: false,
       runGeneratedCases: false,
@@ -152,7 +147,6 @@ export default function TemplatePanel(): React.JSX.Element {
         steps: tmpl.steps.length > 0 ? tmpl.steps : [""],
         filePath: tmpl.filePath || "",
         suitName: tmpl.suitName || "",
-        jiraURL: tmpl.jiraURL || "",
         explore: tmpl.explore,
         runExploredCases: tmpl.runExploredCases,
         runGeneratedCases: tmpl.runGeneratedCases,
@@ -182,7 +176,6 @@ export default function TemplatePanel(): React.JSX.Element {
       steps: (firstCard.steps as string[]) || [],
       filePath: (firstCard.filePath as string) || "",
       suitName: (firstCard.suitName as string) || "",
-      jiraURL: (firstCard.jiraURL as string) || "",
       explore: firstCard.explore === true,
       runExploredCases: firstCard.runExploredCases === true,
       runGeneratedCases: firstCard.runGeneratedCases === true,
@@ -244,12 +237,6 @@ export default function TemplatePanel(): React.JSX.Element {
           {tmpl.steps.length > 0 ? ` · ${tmpl.steps.length} step${tmpl.steps.length > 1 ? "s" : ""}` : ""}
           {urlPath ? ` · ${urlPath}` : ""}
         </p>
-        {tmpl.jiraURL && (
-          <span className="operator-badge">
-            Jira
-          </span>
-        )}
-
         <button
           onClick={() => handleInsert(tmpl)}
           disabled={!isReady}
@@ -340,7 +327,7 @@ export default function TemplatePanel(): React.JSX.Element {
                   <button
                     onClick={handleSaveAsTemplate}
                     disabled={!savingName.trim()}
-                    className="operator-button-primary flex-1 px-2 py-2"
+                    className="operator-button-primary px-3 py-2"
                   >
                     Save
                   </button>

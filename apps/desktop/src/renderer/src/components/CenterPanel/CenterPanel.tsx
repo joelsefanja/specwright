@@ -4,8 +4,8 @@ import { ChartBar, Play, Plus } from "@phosphor-icons/react";
 import WelcomeScreen from "./WelcomeScreen";
 import InstructionsBuilder from "./InstructionsBuilder";
 import HealerPanel from "./HealerPanel";
-import { AgentOutputPanel } from "./AgentOutputPanel";
-import { RunTestsPalette } from "./RunTestsPalette";
+import { AgentOutputPanel } from "./agent-output";
+import { RunTestsPalette } from "./run-tests-palette";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
 import { useConfigStore } from "@renderer/store/config.store";
 import { useInstructionStore } from "@renderer/store/instruction.store";
@@ -13,7 +13,7 @@ import { useReportAvailability } from "@renderer/hooks/useReportAvailability";
 import { detectPhaseFromTool, detectPhaseFromText } from "@renderer/hooks/usePhaseDetection";
 import { motionTransition, panelVariants } from "@renderer/motion/presets";
 
-export default function CenterPanel(): React.JSX.Element {
+export default function CenterPanel({ headless = false }: { headless?: boolean }): React.JSX.Element | null {
   const { appendToken, appendLog, finishRun, setError, abortRun, setActivePhase, setPhaseStatus, splitForPhase, status, setMcpStatus, updateDirectRun } = usePipelineStore();
   const { projectState, loaded, hydrate, activeTab, setActiveTab, projectPath } = useConfigStore();
   const addInstruction = useInstructionStore((s) => s.addCard);
@@ -167,10 +167,14 @@ export default function CenterPanel(): React.JSX.Element {
     };
   }, [handleToken, appendLog, finishRun, setError, abortRun, setPhaseStatus, showPermission, advanceToPhase, setMcpStatus, updateDirectRun, checkReportAvailability]);
 
+  if (headless) {
+    return null;
+  }
+
   if (!loaded) {
     return (
       <div className="flex items-center justify-center h-full">
-        <span className="w-5 h-5 border-2 border-brand-400 border-t-transparent animate-spin" />
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-400 border-t-transparent" />
       </div>
     );
   }
@@ -180,7 +184,7 @@ export default function CenterPanel(): React.JSX.Element {
   }
 
   const showOutput = status === "running" || status === "done" || status === "error" || status === "aborted";
-  const hasReports = reportAvailability.playwright || reportAvailability.bdd;
+  const hasReports = reportAvailability.playwright || reportAvailability.bdd || reportAvailability.allure;
 
   const reportDropdown = (
     <div className="relative" ref={reportMenuRef}>
@@ -192,6 +196,14 @@ export default function CenterPanel(): React.JSX.Element {
       </button>
       {showReportMenu && (
         <div className="operator-menu absolute right-0 top-full mt-1 z-50 min-w-[170px] py-1">
+          {!hasReports && <p className="operator-field-help m-0 px-3 py-2">Run tests first to create a report.</p>}
+          <button
+            disabled={!reportAvailability.allure}
+            onClick={() => { setShowReportMenu(false); window.specwright.report.openAllure(projectPath!); }}
+            className="operator-menu-item"
+          >
+            Allure Report
+          </button>
           <button
             disabled={!reportAvailability.playwright}
             onClick={() => { setShowReportMenu(false); window.specwright.report.openPlaywright(projectPath!); }}

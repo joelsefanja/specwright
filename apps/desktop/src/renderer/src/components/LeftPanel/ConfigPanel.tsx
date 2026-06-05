@@ -6,22 +6,22 @@ import { AuthSettingsModal, EMPTY_AUTH, isOAuthConfigured, isEmailPasswordConfig
 import type { AuthFields } from "./AuthSettingsModal";
 import { PluginPickerModal } from "./PluginPickerModal";
 import { OpenCodeConfigModal } from "./OpenCodeConfigModal";
+import { TestingAdapterSection } from "./TestingAdapterSection";
+import { ThemeSelect } from "./ThemeSelect";
+import { WebsiteToTestSection } from "./WebsiteToTestSection";
+import {
+  ENVIRONMENT_LABELS,
+  OPENCODE_DEFAULT_MODEL,
+  OPENCODE_DEFAULT_URL,
+  OPENCODE_DEFAULT_VARIANT,
+  getCustomEnvVars,
+  getPreferredAuthStrategy,
+  getProjectBasename,
+  isSensitiveEnvironmentKey,
+  normalizeOpenCodeModel,
+} from "./configPanelHelpers";
 import { ReadinessChecklist } from "../common/Discoverability";
 import { presenceTransition, presenceVariants } from "@renderer/motion/presets";
-
-const ENVS = ["qat", "dev", "staging", "prod", "local"];
-const OPENCODE_DEFAULT_URL = "http://127.0.0.1:18789";
-const OPENCODE_DEFAULT_MODEL = "gpt-5.5-fast";
-const OPENCODE_DEFAULT_VARIANT = "low";
-
-function normalizeOpenCodeModel(model?: string | null): string {
-  return !model || model === "big-pickle" ? OPENCODE_DEFAULT_MODEL : model;
-}
-
-// Strip @scope/ prefix for display — full name kept in title tooltip
-function shortName(name: string): string {
-  return name.replace(/^@[^/]+\//, "");
-}
 
 const SyncButtonIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -31,55 +31,6 @@ const SyncButtonIcon = () => (
     <path d="M8 16H3v5" />
   </svg>
 );
-
-function ThemeSelect({
-  value,
-  options,
-  onChange,
-  className = "",
-}: {
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-  className?: string;
-}): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((option) => option.value === value) ?? options[0];
-
-  return (
-    <div className={`operator-dropdown ${className}`} onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-    }}>
-      <button
-        type="button"
-        className="operator-dropdown-trigger"
-        data-open={open}
-        onClick={() => setOpen((next) => !next)}
-      >
-        {selected?.label ?? value}
-      </button>
-      {open && (
-        <div className="operator-dropdown-menu">
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="operator-dropdown-option"
-              data-selected={option.value === value}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function SidebarHeading({ title, description }: { title: string; description?: string }): React.JSX.Element {
   return (
@@ -145,11 +96,6 @@ export default function ConfigPanel(): React.JSX.Element {
         : ocStatus === "error"
           ? "Not reachable"
           : ocServerRunning ? "Connected" : "Preparing";
-  const preferredAuthStrategy = (strategies: string[]): string =>
-    strategies.find((strategy) => strategy.toLowerCase() === "backoffice")
-    ?? strategies.find((strategy) => strategy !== "none")
-    ?? "oauth";
-
   const getOpenCodeUrl = (): string => (envVars.SPECWRIGHT_OPENCODE_URL as string) || OPENCODE_DEFAULT_URL;
 
   const startAndDetectOpenCode = async (): Promise<void> => {
@@ -186,7 +132,7 @@ export default function ConfigPanel(): React.JSX.Element {
     window.specwright.project.listAuthStrategies(projectPath).then((strategies) => {
       setAuthStrategies(strategies);
       if (!envVars.AUTH_STRATEGY) {
-        setEnvVar("AUTH_STRATEGY", preferredAuthStrategy(strategies));
+        setEnvVar("AUTH_STRATEGY", getPreferredAuthStrategy(strategies));
         saveEnv();
       }
     }).catch(() => null);
@@ -219,7 +165,7 @@ export default function ConfigPanel(): React.JSX.Element {
       setEnvVar("AUTH_STRATEGY", "none");
       saveEnv();
     } else {
-      const strategy = preferredAuthStrategy(authStrategies);
+      const strategy = getPreferredAuthStrategy(authStrategies);
       setEnvVar("AUTH_STRATEGY", strategy);
       saveEnv();
       if ((strategy === "oauth" || strategy === "email-password") && !isOAuthConfigured(authFields) && !isEmailPasswordConfigured(authFields)) {
@@ -267,9 +213,6 @@ export default function ConfigPanel(): React.JSX.Element {
     }
   };
 
-  const isSensitiveKey = (key: string): boolean =>
-    /password|secret|token|api.?key|access.?code/i.test(key);
-
   const toggleSecretVisibility = (key: string): void => {
     setVisibleSecrets((prev) => {
       const next = new Set(prev);
@@ -279,7 +222,6 @@ export default function ConfigPanel(): React.JSX.Element {
     });
   };
 
-  const basename = (p: string): string => p.replace(/\\/g, "/").split("/").pop() ?? p;
   const projectOptions = recentProjects.filter((project) => project !== projectPath).slice(0, 5);
 
   const handleAddCustomVar = (): void => {
@@ -290,26 +232,15 @@ export default function ConfigPanel(): React.JSX.Element {
     setCustomVarVal("");
   };
 
-  const managedKeys = new Set([
-    "BASE_URL", "TEST_ENV", "AUTH_STRATEGY",
-    "TEST_USERNAME", "TEST_PASSWORD", "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
-    "TEST_USER_NAME", "TEST_USER_PICTURE",
-    "OAUTH_STORAGE_KEY", "OAUTH_SIGNIN_PATH", "OAUTH_BUTTON_TEST_ID", "OAUTH_POST_LOGIN_URL",
-    "HEADLESS", "TEST_TIMEOUT", "ENABLE_SCREENSHOTS", "ENABLE_VIDEO_RECORDING", "ENABLE_TRACING",
-    "BASE_ENV", "NODE_ENV", "BROWSER", "CHROME_ARGS",
-    "CUCUMBER_REPORT_PATH", "CODEGEN_OUTPUT_PATH",
-    "RETAIN_VIDEO_ON_SUCCESS", "VITE_BUILD_ENVIRONMENT",
-    // LLM provider settings
-    "SPECWRIGHT_LLM_PROVIDER", "SPECWRIGHT_LLM_BASE_URL", "SPECWRIGHT_MODEL", "SPECWRIGHT_LLM_API_KEY",
-    "SPECWRIGHT_OPENCODE_URL", "SPECWRIGHT_OPENCODE_VARIANT",
-  ]);
-
-  const customVars = Object.entries(envVars).filter(([k]) => !managedKeys.has(k));
+  const customVars = getCustomEnvVars(envVars);
   const isReady = projectState === "ready";
   const appUrlConfigured = Boolean((envVars.BASE_URL as string | undefined)?.trim());
   const loginConfigured = !authRequired || isConfigured;
   const aiConfigured = Boolean((envVars.SPECWRIGHT_MODEL as string | undefined)?.trim()) || (envVars.SPECWRIGHT_LLM_PROVIDER as string) === "opencode";
   const focusAppUrl = (): void => appUrlInputRef.current?.focus();
+  const onOpenPluginPicker = (): void => {
+    setShowPluginModal(true);
+  };
   const openLoginSettings = (): void => {
     if (!authRequired) handleAuthToggle(true);
     else if (usesBuiltInAuthSettings) setShowAuthModal(true);
@@ -320,31 +251,31 @@ export default function ConfigPanel(): React.JSX.Element {
   };
   const setupSteps = [
     {
-      label: "Project folder",
-      description: isReady ? `Tests will be created in ${basename(projectPath || "")}.` : "Open the repository where Specwright should create tests.",
+      label: "Projectmap",
+      description: isReady ? `Tests komen in ${getProjectBasename(projectPath || "")}.` : "Kies de map van je app.",
       complete: isReady,
-      actionLabel: "Open",
+      actionLabel: "Kiezen",
       onAction: isReady ? undefined : pickAndBootstrap,
     },
     {
-      label: "Website URL",
-      description: appUrlConfigured ? "Browser exploration has a starting address." : "Tell Specwright where the app runs, for example http://localhost:5173.",
+      label: "URL van je app",
+      description: appUrlConfigured ? "Specwright weet welke app open moet." : "Vul de URL van je draaiende app in.",
       complete: appUrlConfigured,
-      actionLabel: "Add URL",
+      actionLabel: "URL invullen",
       onAction: isReady ? focusAppUrl : undefined,
     },
     {
-      label: "Login choice",
-      description: loginConfigured ? "Specwright knows whether to sign in before testing." : "Add credentials, choose a login script, or turn login off.",
+      label: "Login",
+      description: loginConfigured ? "Login-keuze is ingesteld." : "Kies of Specwright moet inloggen.",
       complete: loginConfigured,
-      actionLabel: authRequired ? "Configure" : "Choose",
+      actionLabel: authRequired ? "Invullen" : "Kiezen",
       onAction: isReady ? openLoginSettings : undefined,
     },
     {
-      label: "AI model",
-      description: aiConfigured ? "Specwright has a model for writing tests." : "Choose the model that writes the feature and step files.",
+      label: "AI",
+      description: aiConfigured ? "Test-AI is gekozen." : "Kies waarmee Specwright de test maakt.",
       complete: aiConfigured,
-      actionLabel: "Choose model",
+      actionLabel: "Test-AI kiezen",
       onAction: isReady ? focusAiModel : undefined,
     },
   ];
@@ -388,8 +319,8 @@ export default function ConfigPanel(): React.JSX.Element {
       <div className="flex flex-col h-full overflow-y-auto scrollable bg-operator-panel" data-tab-staging="true" style={{ padding: "0 var(--sw-panel-pad) var(--sw-panel-pad)", gap: "var(--sw-space-3)" }}>
 
         <div className="operator-sidebar-title">
-          <p>Workspace</p>
-          <span>Project setup and run configuration</span>
+          <p>Instellingen</p>
+          <span>Wat Specwright nodig heeft om tests te maken</span>
         </div>
 
         <AnimatePresence initial={false}>
@@ -406,9 +337,9 @@ export default function ConfigPanel(): React.JSX.Element {
               <button
                 onClick={() => window.specwright.app.installUpdate()}
                 title={`v${updateVersion} available — click to download`}
-                className="operator-button-primary w-full"
+                className="operator-button-primary"
               >
-                Install update v{updateVersion}
+                  Update v{updateVersion} installeren
               </button>
             </motion.div>
           )}
@@ -417,15 +348,15 @@ export default function ConfigPanel(): React.JSX.Element {
         {/* Project */}
         <section className="operator-sidebar-section operator-sidebar-section-first">
           <SidebarHeading
-            title="Project"
-            description={isReady ? undefined : "Open the repository where Specwright should create tests."}
+            title="Projectmap"
+            description={isReady ? undefined : "Kies de map van je app."}
           />
 
           {isReady ? (
             <div className="operator-project-summary">
               <div className="operator-project-row">
                 <div className="min-w-0 flex-1 operator-stack-sm">
-                  <p className="operator-control-label">Current project</p>
+                  <p className="operator-control-label">Huidig project</p>
                   <div className="operator-project-dropdown" onBlur={(event) => {
                     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setProjectDropdownOpen(false);
                   }}>
@@ -436,7 +367,7 @@ export default function ConfigPanel(): React.JSX.Element {
                       title={projectPath}
                       aria-expanded={projectDropdownOpen}
                     >
-                      <span className="operator-project-name">{basename(projectPath)}</span>
+                      <span className="operator-project-name">{getProjectBasename(projectPath)}</span>
                       <span className="operator-project-path">{projectPath}</span>
                     </button>
                     {projectDropdownOpen && (
@@ -453,11 +384,11 @@ export default function ConfigPanel(): React.JSX.Element {
                             className="operator-project-option"
                             title={project}
                           >
-                            <span>{basename(project)}</span>
+                            <span>{getProjectBasename(project)}</span>
                             <small>{project}</small>
                           </button>
                         )) : (
-                          <p className="operator-project-empty">No recent projects yet.</p>
+                          <p className="operator-project-empty">Nog geen eerdere projecten.</p>
                         )}
                         <button
                           type="button"
@@ -468,7 +399,7 @@ export default function ConfigPanel(): React.JSX.Element {
                           }}
                           className="operator-project-option operator-project-option-action"
                         >
-                          Open another project
+                          Ander project kiezen
                         </button>
                       </div>
                     )}
@@ -476,18 +407,18 @@ export default function ConfigPanel(): React.JSX.Element {
                   <div className="operator-project-actions" aria-hidden={projectDropdownOpen}>
                   {confirmReset ? (
                     <>
-                        <span className="operator-field-help">Close project?</span>
+                        <span className="operator-field-help">Project loskoppelen?</span>
                       <button
                         onClick={() => { resetProject(); setConfirmReset(false); }}
                         className="operator-button operator-button-compact operator-danger hover:border-[var(--sw-danger)]"
                       >
-                        Yes
+                        Ja
                       </button>
                       <button
                         onClick={() => setConfirmReset(false)}
                         className="operator-button operator-button-compact"
                       >
-                        No
+                        Nee
                       </button>
                     </>
                   ) : (
@@ -496,13 +427,13 @@ export default function ConfigPanel(): React.JSX.Element {
                         type="button"
                         onClick={() => loadExistingProject(projectPath)}
                         className="operator-icon-button"
-                        title="Reload project settings"
+                        title="Project opnieuw laden"
                       >
                         <SyncButtonIcon />
                       </button>
                       <button
                         onClick={() => setConfirmReset(true)}
-                        title="Close project"
+                        title="Project loskoppelen"
                         className="operator-icon-button hover:text-[var(--sw-danger)]"
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -514,9 +445,9 @@ export default function ConfigPanel(): React.JSX.Element {
                       <button
                         onClick={pickAndBootstrap}
                         className="operator-button operator-button-compact"
-                        title="Switch workspace"
+                        title="Ander project kiezen"
                       >
-                        Switch
+                        Wisselen
                       </button>
                     </>
                   )}
@@ -525,84 +456,17 @@ export default function ConfigPanel(): React.JSX.Element {
               </div>
             </div>
           ) : (
-            <p className="operator-text-subtle">Open or bootstrap a project to manage this workspace.</p>
+            <p className="operator-text-subtle">Kies een projectmap om te starten.</p>
           )}
         </section>
 
-        <section className="operator-sidebar-section">
-          <div className="flex items-center justify-between gap-3">
-            <SidebarHeading
-              title="Testing adapter"
-              description="Playwright BDD scaffold, shared steps, and field helpers."
-            />
-            {isReady && (
-              <button
-                onClick={() => setShowPluginModal(true)}
-                disabled={applyingPlugin}
-                className="operator-button-quiet px-2 py-1 disabled:opacity-40"
-              >
-                Change
-              </button>
-            )}
-          </div>
-
-          {isReady ? (
-            <div className="min-w-0">
-              {applyingPlugin ? (
-                <p className="operator-text-subtle flex items-center gap-1 mt-1">
-                  <span className="w-2.5 h-2.5 border border-brand-400 border-t-transparent animate-spin inline-block" />
-                  Installing...
-                </p>
-              ) : pluginInfo && pluginInfo.name !== "none" ? (
-                <div className="mt-1 min-w-0">
-                  <p
-                    className="operator-text truncate"
-                    title={`${pluginInfo.name}${pluginInfo.version && pluginInfo.version !== "unknown" ? ` v${pluginInfo.version}` : ""}`}
-                  >
-                    {shortName(pluginInfo.name)}
-                    {pluginInfo.version && pluginInfo.version !== "unknown" && (
-                      <span className="operator-text-subtle ml-1">v{pluginInfo.version}</span>
-                    )}
-                  </p>
-                  {pluginInfo.hasOverlay && pluginInfo.overlayName && (
-                    <p
-                      className="operator-text-accent font-mono truncate flex items-center gap-1 mt-1"
-                      title={pluginInfo.overlayName}
-                    >
-                      <span className="text-stone-500">↳</span>
-                      {shortName(pluginInfo.overlayName)}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="operator-text-subtle mt-1">Using the default Specwright adapter</p>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                {pendingPlugin ? (
-                  <p
-                    className="operator-text-accent font-mono truncate mt-1"
-                    title={pendingPlugin.type === "local" ? pendingPlugin.dirPath : pendingPlugin.packageName}
-                  >
-                    {pendingPlugin.type === "local"
-                      ? pendingPlugin.dirPath.split("/").pop()
-                      : shortName(pendingPlugin.packageName)}
-                  </p>
-                ) : (
-                  <p className="operator-text-subtle mt-1">Choose a plugin before bootstrap</p>
-                )}
-              </div>
-              <button
-                onClick={() => setShowPluginModal(true)}
-                className="text-stone-500 hover:text-brand-400 text-xs transition-colors flex-shrink-0"
-              >
-                Change plugin
-              </button>
-            </div>
-          )}
-        </section>
+        <TestingAdapterSection
+          isReady={isReady}
+          isApplyingPlugin={applyingPlugin}
+          pluginInfo={pluginInfo}
+          pendingPlugin={pendingPlugin}
+          onOpenPluginPicker={onOpenPluginPicker}
+        />
 
         <AnimatePresence initial={false}>
           {hasMissingSetup && (
@@ -615,8 +479,8 @@ export default function ConfigPanel(): React.JSX.Element {
               transition={presenceTransition}
             >
               <ReadinessChecklist
-                title="Needs attention"
-                description="Fix these items before generating tests."
+                title="Nog nodig"
+                description="Vul dit aan voordat je tests maakt."
                 steps={setupSteps}
               />
             </motion.div>
@@ -627,55 +491,31 @@ export default function ConfigPanel(): React.JSX.Element {
         {isReady && (
           <>
             <section className="operator-form">
-              <div className="operator-config-section">
-                <div className="flex items-center justify-between gap-3">
-                  <SidebarHeading
-                    title="Website to test"
-                    description={appUrlConfigured ? undefined : "The running app Specwright opens in a browser."}
-                  />
-                  <span className={appUrlConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{appUrlConfigured ? "Set" : "Needed"}</span>
-                </div>
-
-              <div>
-                <label className="operator-control-label">App URL</label>
-                <input
-                  ref={appUrlInputRef}
-                  type="text"
-                  value={envVars.BASE_URL ?? ""}
-                  onChange={(e) => setEnvVar("BASE_URL", e.target.value)}
-                  onBlur={saveEnv}
-                  placeholder="https://app.example.com"
-                  className="operator-field w-full px-2 py-2"
-                />
-                <p className="operator-field-help">Specwright opens this app during exploration. Relative page paths such as <span className="font-mono">/dashboard</span> start from here.</p>
-              </div>
-
-              {envVars.TEST_ENV && (
-                <div>
-                  <label className="operator-control-label">Environment label</label>
-                  <ThemeSelect
-                    value={envVars.TEST_ENV ?? "qat"}
-                    onChange={(value) => { setEnvVar("TEST_ENV", value); saveEnv(); }}
-                    options={ENVS.map((env) => ({ value: env, label: env }))}
-                  />
-                </div>
-              )}
-              </div>
+              <WebsiteToTestSection
+                appUrlInputRef={appUrlInputRef}
+                appUrlValue={envVars.BASE_URL ?? ""}
+                environmentLabel={envVars.TEST_ENV}
+                environmentLabels={ENVIRONMENT_LABELS}
+                isAppUrlConfigured={appUrlConfigured}
+                onAppUrlChange={(value) => setEnvVar("BASE_URL", value)}
+                onEnvironmentLabelChange={(value) => setEnvVar("TEST_ENV", value)}
+                onSaveEnvironment={saveEnv}
+              />
 
               {/* Auth */}
               <div className="operator-config-section">
                 <div className="flex items-center justify-between gap-3">
                   <SidebarHeading
-                    title="Sign in before exploring"
-                    description={loginConfigured ? undefined : "Choose whether browser exploration must sign in."}
+                    title="Login"
+                    description={loginConfigured ? undefined : "Choose whether Specwright must sign in before testing."}
                   />
-                  <span className={loginConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{loginConfigured ? authRequired ? "Configured" : "Not needed" : "Needed"}</span>
+                   <span className={loginConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{loginConfigured ? authRequired ? "Ingevuld" : "Niet nodig" : "Nog nodig"}</span>
               </div>
               <div className="operator-stack-sm">
                 <div className="operator-setting-row operator-setting-row-explained">
                   <div className="operator-setting-copy">
-                    <span>Use a login flow</span>
-                    <span>{authRequired ? "Specwright signs in before it explores the app." : "Specwright explores without signing in."}</span>
+                    <span>Login gebruiken</span>
+                    <span>{authRequired ? "Specwright logt eerst in." : "Specwright opent de app zonder login."}</span>
                   </div>
                   <button
                     type="button"
@@ -690,7 +530,7 @@ export default function ConfigPanel(): React.JSX.Element {
                 {authRequired && (
                   <div className="operator-stack-sm">
                     <div>
-                      <label className="operator-control-label">How to sign in</label>
+                          <label className="operator-control-label">Loginmethode</label>
                       <div className="flex items-center gap-2">
                         <ThemeSelect
                           value={authStrategy}
@@ -702,7 +542,7 @@ export default function ConfigPanel(): React.JSX.Element {
                         {usesBuiltInAuthSettings && (
                           <button
                             onClick={() => setShowAuthModal(true)}
-                            title="Configure auth settings"
+                            title="Login invullen"
                             className="operator-icon-button relative"
                           >
                             <GearSix className="operator-icon" weight="bold" />
@@ -717,18 +557,18 @@ export default function ConfigPanel(): React.JSX.Element {
 
                     {!usesBuiltInAuthSettings ? (
                       <p className="operator-field-help">
-                        Uses <span className="font-mono">auth-strategies/{authStrategy}.js</span> in this project.
+                        Gebruikt de loginmethode <span className="font-mono">{authStrategy}</span>.
                       </p>
                     ) : isConfigured ? (
                       <p className="operator-field-help">
-                        Login details are saved for <span className="operator-text-muted">{authFields.userEmail}</span>.
+                        Login is opgeslagen voor <span className="operator-text-muted">{authFields.userEmail}</span>.
                       </p>
                     ) : (
                       <button
                         onClick={() => setShowAuthModal(true)}
                         className="operator-link text-xs text-left"
                       >
-                         Add login details
+                         Login invullen
                       </button>
                     )}
                   </div>
@@ -740,14 +580,14 @@ export default function ConfigPanel(): React.JSX.Element {
               <div className="operator-config-section" ref={aiSectionRef}>
                 <div className="flex items-center justify-between gap-3">
                   <SidebarHeading
-                    title="Test writer"
-                    description={aiConfigured ? undefined : "Choose the model that writes feature files and Playwright steps."}
+                    title="Test-AI"
+                    description={aiConfigured ? undefined : "Kies waarmee Specwright je app bekijkt en de test schrijft."}
                   />
-                  <span className={aiConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{aiConfigured ? "Selected" : "Needed"}</span>
+                  <span className={aiConfigured ? "operator-readiness-ok" : "operator-readiness-warn"}>{aiConfigured ? "Gekozen" : "Nog nodig"}</span>
                 </div>
               <div className="space-y-2">
                 <div>
-                  <label className="operator-control-label">Model source</label>
+                  <label className="operator-control-label">Test-AI</label>
                   <ThemeSelect
                     value={(envVars.SPECWRIGHT_LLM_PROVIDER as string) ?? "anthropic"}
                     onChange={async (provider) => {
@@ -763,16 +603,16 @@ export default function ConfigPanel(): React.JSX.Element {
                       }
                     }}
                     options={[
-                      { value: "opencode", label: "OpenCode local (default)" },
+                      { value: "opencode", label: "OpenCode lokaal (aanbevolen)" },
                       { value: "anthropic", label: "Anthropic Claude" },
-                      { value: "openai", label: "OpenAI compatible" },
-                      { value: "ollama", label: "Ollama local" },
+                      { value: "openai", label: "OpenAI-compatible" },
+                      { value: "ollama", label: "Ollama lokaal" },
                     ]}
                   />
                 </div>
 
                 {(envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode" && <div>
-                  <label className="operator-control-label">Model</label>
+                  <label className="operator-control-label">Modelnaam</label>
                   <input
                     type="text"
                     value={envVars.SPECWRIGHT_MODEL ?? ""}
@@ -793,8 +633,8 @@ export default function ConfigPanel(): React.JSX.Element {
                     }`} />
                     <span className="operator-text-subtle flex-1">
                       {ocStatus === "error"
-                        ? "Local model is not reachable. Check OpenCode."
-                        : `${normalizeOpenCodeModel(ocModel || (envVars.SPECWRIGHT_MODEL as string))} selected`}
+                        ? "OpenCode is niet bereikbaar. Controleer de verbinding."
+                        : `${normalizeOpenCodeModel(ocModel || (envVars.SPECWRIGHT_MODEL as string))} gekozen`}
                     </span>
                     <button
                       onClick={async (e) => {
@@ -802,18 +642,18 @@ export default function ConfigPanel(): React.JSX.Element {
                         await startAndDetectOpenCode();
                       }}
                       className="operator-button-quiet px-2 py-1 shrink-0"
-                      title="Check local model"
+                      title="Verbinding controleren"
                     >
                       {ocStarting ? (
-                        <span className="w-3 h-3 border border-[var(--sw-accent)] border-t-transparent animate-spin inline-block" />
+                        <span className="inline-block h-3 w-3 animate-spin rounded-full border border-[var(--sw-accent)] border-t-transparent" />
                       ) : (
-                        "Check"
+                        "Controleer"
                       )}
                     </button>
                     <button
                       onClick={() => setShowOcModal(true)}
                       className="operator-button-quiet px-2 py-1 shrink-0"
-                      title="Choose model"
+                      title="Model kiezen"
                     >
                       Model
                     </button>
@@ -825,16 +665,16 @@ export default function ConfigPanel(): React.JSX.Element {
 
               <div className="operator-config-section">
                 <SidebarHeading
-                  title="Settings"
-                  description="Run behavior, issue sources, safety, and extra environment values."
+                  title="Geavanceerd"
+                  description="Alleen nodig als je afwijkende testinstellingen gebruikt."
                 />
 
                 <div className="operator-stack-md">
                 {(envVars.SPECWRIGHT_LLM_PROVIDER as string) !== "opencode" && (
                 <div className="operator-advanced-group">
-                  <p className="operator-control-label">AI connection details</p>
+                  <p className="operator-control-label">AI-verbinding</p>
                   <div>
-                    <label className="operator-field-help">Provider URL</label>
+                    <label className="operator-field-help">AI-serverlink</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -849,7 +689,7 @@ export default function ConfigPanel(): React.JSX.Element {
                           const base = (envVars.SPECWRIGHT_LLM_BASE_URL as string) ?? "";
                           if (!base) {
                             setVerifyStatus("error");
-                            setVerifyMessage("Base URL empty");
+                            setVerifyMessage("Vul eerst de serverlink in.");
                             return;
                           }
                           setVerifyStatus("verifying");
@@ -860,33 +700,33 @@ export default function ConfigPanel(): React.JSX.Element {
                         }}
                         className="operator-button"
                       >
-                        {verifyStatus === "verifying" ? "Checking..." : "Check"}
+                        {verifyStatus === "verifying" ? "Controleren..." : "Controleer"}
                       </button>
                     </div>
                     {verifyStatus === "ok" && <p className="operator-text-success mt-1">{verifyMessage}</p>}
                     {verifyStatus === "error" && <p className="operator-danger mt-1">{verifyMessage}</p>}
                   </div>
                   <div>
-                    <label className="operator-field-help">API key</label>
+                    <label className="operator-field-help">API-sleutel</label>
                     <input
                       type="password"
                       value={envVars.SPECWRIGHT_LLM_API_KEY ?? ""}
                       onChange={(e) => setEnvVar("SPECWRIGHT_LLM_API_KEY", e.target.value)}
                       onBlur={saveEnv}
-                      placeholder="Optional provider key"
+                      placeholder="Optionele API-sleutel"
                       className="operator-field w-full px-2 py-2"
                     />
                   </div>
-                  <p className="operator-section-help">Only needed for local or compatible providers. Ollama usually uses <span className="font-mono">http://localhost:11434/v1</span>.</p>
+                  <p className="operator-section-help">Alleen nodig voor eigen of lokale AI-diensten. Ollama gebruikt meestal <span className="font-mono">http://localhost:11434/v1</span>.</p>
                 </div>
                 )}
                 <div className="operator-advanced-group">
-                  <p className="operator-control-label">Run defaults</p>
+                  <p className="operator-control-label">Testuitvoering</p>
 
                 <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
                   <span className="operator-setting-copy">
-                    <span>Browser visibility</span>
-                    <span>{envVars.HEADLESS === "true" ? "Hidden during runs." : "Visible for debugging."}</span>
+                    <span>Browser tonen</span>
+                    <span>{envVars.HEADLESS === "true" ? "Verborgen tijdens tests." : "Zichtbaar tijdens tests."}</span>
                   </span>
                   <button
                     onClick={() => { setEnvVar("HEADLESS", envVars.HEADLESS === "true" ? "false" : "true"); saveEnv(); }}
@@ -898,7 +738,7 @@ export default function ConfigPanel(): React.JSX.Element {
                 </label>
 
                 <div>
-                  <label className="operator-control-label">Max wait per step</label>
+                  <label className="operator-control-label">Maximale wachttijd per stap</label>
                   <input
                     type="number"
                     value={envVars.TEST_TIMEOUT ?? "120000"}
@@ -906,18 +746,18 @@ export default function ConfigPanel(): React.JSX.Element {
                     onBlur={saveEnv}
                     className="operator-field w-full px-2 py-2"
                   />
-                  <p className="operator-field-help">How long Playwright waits before a step is marked failed.</p>
+                  <p className="operator-field-help">Hoe lang Specwright wacht voordat een stap faalt.</p>
                 </div>
 
                 <div className="operator-setting-row operator-setting-row-explained">
                   <span className="operator-setting-copy">
-                    <span>Screenshots</span>
-                    <span>Capture visual evidence when a run fails.</span>
+                    <span>Schermafbeeldingen</span>
+                    <span>Bewaar beeld als een test faalt.</span>
                   </span>
                   <ThemeSelect
                     value={envVars.ENABLE_SCREENSHOTS === "true" ? "failure" : "off"}
                     onChange={(value) => { setEnvVar("ENABLE_SCREENSHOTS", value === "off" ? "false" : "true"); saveEnv(); }}
-                    options={[{ value: "failure", label: "On Failure" }, { value: "off", label: "Off" }]}
+                    options={[{ value: "failure", label: "Bij fout" }, { value: "off", label: "Uit" }]}
                     className="operator-select-compact"
                   />
                 </div>
@@ -925,7 +765,7 @@ export default function ConfigPanel(): React.JSX.Element {
                 <div className="operator-setting-row operator-setting-row-explained">
                   <span className="operator-setting-copy">
                     <span>Video</span>
-                    <span>Keep recordings for failed runs or every run.</span>
+                    <span>Bewaar opnames van tests.</span>
                   </span>
                   <ThemeSelect
                     value={
@@ -937,15 +777,15 @@ export default function ConfigPanel(): React.JSX.Element {
                       setEnvVar("RETAIN_VIDEO_ON_SUCCESS", val === "always" ? "true" : "false");
                       saveEnv();
                     }}
-                    options={[{ value: "failure", label: "On Failure" }, { value: "always", label: "Always" }, { value: "off", label: "Off" }]}
+                    options={[{ value: "failure", label: "Bij fout" }, { value: "always", label: "Altijd" }, { value: "off", label: "Uit" }]}
                     className="operator-select-compact"
                   />
                 </div>
 
                 <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
                   <span className="operator-setting-copy">
-                    <span>Trace data</span>
-                    <span>Record Playwright traces for deeper debugging.</span>
+                    <span>Diepe foutanalyse</span>
+                    <span>Bewaar extra details om fouten te onderzoeken.</span>
                   </span>
                   <button
                     onClick={() => { setEnvVar("ENABLE_TRACING", envVars.ENABLE_TRACING === "true" ? "false" : "true"); saveEnv(); }}
@@ -959,29 +799,12 @@ export default function ConfigPanel(): React.JSX.Element {
                 </div>
 
                 <div className="operator-advanced-group">
-                <p className="operator-control-label">Issue sources</p>
-                <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
-                  <span className="operator-setting-copy">
-                    <span>Show Jira source</span>
-                    <span>Show Jira next to GitLab and uploaded files in Explorer.</span>
-                  </span>
-                  <button
-                    onClick={() => { setEnvVar("SPECWRIGHT_SHOW_JIRA_SOURCE", envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true" ? "false" : "true"); saveEnv(); }}
-                    className="operator-toggle"
-                    data-active={envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true"}
-                  >
-                    <span className="operator-toggle-knob" />
-                  </button>
-                </label>
-                </div>
-
-                <div className="operator-advanced-group">
-                <p className="operator-control-label">Agent safety</p>
+                <p className="operator-control-label">Goedkeuringen</p>
                 <label className="operator-setting-row operator-setting-row-explained cursor-pointer">
                   <div>
                     <span className="operator-setting-copy">
-                      <span>Auto-approve tools</span>
-                      <span>Let the agent run tools without stopping for confirmation.</span>
+                      <span>Automatisch doorgaan</span>
+                      <span>Gebruik dit alleen als Specwright niet hoeft te pauzeren.</span>
                     </span>
                   </div>
                   <button
@@ -994,18 +817,18 @@ export default function ConfigPanel(): React.JSX.Element {
                 </label>
                 {skipPermissions && (
                   <p className="operator-field-help">
-                    Tool calls can run without confirmation in this workspace.
+                    Specwright gaat door zonder tussentijdse bevestiging.
                   </p>
                 )}
                 </div>
 
                 <div className="operator-advanced-group">
-                <p className="operator-control-label">Extra environment variables</p>
-                <p className="operator-section-help">Custom values written to the project env file. Main Specwright settings are managed in the sections above.</p>
+                <p className="operator-control-label">Extra projectwaarden</p>
+                <p className="operator-section-help">Alleen nodig voor projectspecifieke instellingen buiten de standaardvelden.</p>
               {customVars.length > 0 && (
                 <div className="space-y-3">
                   {customVars.map(([key, val]) => {
-                    const sensitive = isSensitiveKey(key);
+                    const sensitive = isSensitiveEnvironmentKey(key);
                     const isVisible = visibleSecrets.has(key);
                     return (
                       <div key={key} className="operator-stack-sm">

@@ -1,0 +1,503 @@
+.specwright-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--sw-accent) 12%, transparent), transparent 28%),
+    linear-gradient(90deg, color-mix(in srgb, var(--sw-line) 34%, transparent) 1px, transparent 1px),
+    linear-gradient(0deg, color-mix(in srgb, var(--sw-line) 28%, transparent) 1px, transparent 1px),
+    var(--sw-bg);
+  background-size: auto, calc(72px * var(--sw-ui-scale)) calc(72px * var(--sw-ui-scale)), calc(72px * var(--sw-ui-scale)) calc(72px * var(--sw-ui-scale)), auto;
+  pointer-events: none;
+  animation: introBackdropIn 560ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-static {
+  pointer-events: auto;
+}
+
+.specwright-intro[data-exiting="true"] {
+  animation: introExit var(--intro-exit-duration, 420ms) cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-card {
+  width: min(calc(980px * var(--sw-ui-scale)), calc(100vw - (var(--sw-modal-gutter) * 2)));
+  min-height: min(calc(500px * var(--sw-ui-scale)), calc(100vh - (var(--sw-modal-gutter) * 2)));
+  max-height: calc(100vh - (var(--sw-modal-gutter) * 2));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: var(--sw-border-width) solid var(--sw-line);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--sw-surface) 92%, var(--sw-bg)), color-mix(in srgb, var(--sw-surface) 78%, var(--sw-bg)));
+  box-shadow:
+    0 28px 86px color-mix(in srgb, var(--sw-bg) 78%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--sw-text) 7%, transparent);
+  animation: introCardArrive 520ms cubic-bezier(.16, 1, .3, 1) both;
+  overflow: hidden;
+}
+
+.specwright-intro-rail {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: var(--sw-space-4);
+  align-items: center;
+  min-height: calc(38px * var(--sw-ui-scale));
+  border-bottom: var(--sw-border-width) solid var(--sw-line);
+  color: var(--sw-text-subtle);
+  padding: 0 var(--sw-space-5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: calc(10px * var(--sw-ui-scale));
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  animation: introContentArrive 420ms 40ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-rail span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.specwright-intro-rail span:first-child {
+  color: var(--sw-text);
+}
+
+.specwright-intro-card-error {
+  width: min(560px, calc(100vw - 48px));
+  min-height: 0;
+  grid-template-columns: 1fr;
+  gap: var(--sw-space-5);
+  padding: var(--sw-space-7);
+  border-right: var(--sw-border-width) solid var(--sw-line);
+  border-color: color-mix(in srgb, var(--sw-danger) 44%, var(--sw-line));
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--sw-danger) 12%, var(--sw-bg));
+}
+
+.specwright-intro-mark {
+  width: calc(64px * var(--sw-ui-scale));
+  height: calc(64px * var(--sw-ui-scale));
+  display: grid;
+  place-items: center;
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-accent) 55%, var(--sw-line));
+  background: var(--sw-accent);
+  color: var(--sw-on-accent);
+  font-size: calc(30px * var(--sw-ui-scale));
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  animation: introMarkSettle 520ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-brand {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--sw-space-5);
+  padding: var(--sw-space-6) var(--sw-space-7);
+  border-right: var(--sw-border-width) solid var(--sw-line);
+}
+
+.specwright-intro-brand-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sw-space-4);
+}
+
+.specwright-intro-kicker {
+  color: var(--sw-text-subtle);
+  font-size: calc(11px * var(--sw-ui-scale));
+  font-weight: 800;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  animation: introContentArrive 420ms 90ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-mode {
+  margin: var(--sw-space-1) 0 0;
+  color: var(--sw-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: calc(11px * var(--sw-ui-scale));
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-align: right;
+  text-transform: uppercase;
+  animation: introContentArrive 420ms 120ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-title {
+  max-width: 12ch;
+  margin: var(--sw-space-2) 0 0;
+  color: var(--sw-text);
+  font-size: clamp(34px, calc(54px * var(--sw-ui-scale)), 68px);
+  line-height: .9;
+  font-weight: 650;
+  letter-spacing: -0.06em;
+  animation: introContentArrive 480ms 120ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-subtitle {
+  max-width: 34ch;
+  margin: var(--sw-space-4) 0 0;
+  color: var(--sw-text-muted);
+  font-size: calc(14px * var(--sw-ui-scale));
+  line-height: 1.55;
+  animation: introContentArrive 480ms 170ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-diagram {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-right: var(--sw-border-width) solid var(--sw-line);
+  border-top: var(--sw-border-width) solid var(--sw-line);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--sw-line) 28%, transparent) 1px, transparent 1px),
+    linear-gradient(0deg, color-mix(in srgb, var(--sw-line) 22%, transparent) 1px, transparent 1px),
+    color-mix(in srgb, var(--sw-bg) 50%, transparent);
+  background-size: calc(28px * var(--sw-ui-scale)) calc(28px * var(--sw-ui-scale));
+  overflow: hidden;
+  animation: introContentArrive 480ms 190ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-diagram-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  stroke: color-mix(in srgb, var(--sw-accent) 72%, var(--sw-text));
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.specwright-intro-diagram-lines path {
+  stroke-dasharray: 520;
+  stroke-dashoffset: 520;
+  animation: introLineDraw var(--intro-duration, 5200ms) var(--intro-delay, 180ms) cubic-bezier(.22, .08, .14, 1) both;
+}
+
+.specwright-intro-diagram-node {
+  position: absolute;
+  z-index: 1;
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-accent) 40%, var(--sw-line));
+  background: color-mix(in srgb, var(--sw-surface) 90%, var(--sw-bg));
+  color: var(--sw-text);
+  padding: var(--sw-space-2) var(--sw-space-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: calc(10px * var(--sw-ui-scale));
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.specwright-intro-diagram-node-a { left: 10%; top: 20%; }
+.specwright-intro-diagram-node-b { right: 10%; top: 42%; }
+.specwright-intro-diagram-node-c { left: 12%; bottom: 18%; }
+
+.specwright-intro-blueprint {
+  display: grid;
+  grid-template-columns: 1fr 1.36fr 0.72fr;
+  grid-auto-rows: calc(28px * var(--sw-ui-scale));
+  gap: var(--sw-space-2);
+  max-width: calc(420px * var(--sw-ui-scale));
+  animation: introContentArrive 480ms 220ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-blueprint span {
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 78%, transparent);
+  background: color-mix(in srgb, var(--sw-field) 66%, transparent);
+  position: relative;
+  overflow: hidden;
+}
+
+.specwright-intro-blueprint span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--sw-accent) 26%, transparent), transparent);
+  animation: introBlueprintScan 1600ms ease-in-out infinite;
+}
+
+.specwright-intro-blueprint span:nth-child(2),
+.specwright-intro-blueprint span:nth-child(5) {
+  background: color-mix(in srgb, var(--sw-accent) 15%, var(--sw-field));
+}
+
+.specwright-intro-blueprint span:nth-child(4) {
+  grid-column: span 2;
+}
+
+.specwright-intro-status {
+  grid-row: 2 / span 2;
+  grid-column: 2;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: end;
+  gap: var(--sw-space-3);
+  padding: var(--sw-space-6);
+  background: color-mix(in srgb, var(--sw-field) 78%, var(--sw-surface));
+}
+
+.specwright-intro-status-kicker {
+  margin: 0 0 var(--sw-space-4);
+  color: var(--sw-text-subtle);
+  font-size: calc(10px * var(--sw-ui-scale));
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  animation: introStatusArrive 420ms 120ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-status-row {
+  display: grid;
+  grid-template-columns: calc(34px * var(--sw-ui-scale)) minmax(0, 1fr) auto;
+  gap: var(--sw-space-3);
+  align-items: center;
+  padding-bottom: var(--sw-space-2);
+  border-bottom: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 72%, transparent);
+  color: var(--sw-text-muted);
+  font-size: calc(12px * var(--sw-ui-scale));
+  font-weight: 650;
+  letter-spacing: .03em;
+  animation: introStatusArrive 720ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-status-row[data-active="true"] {
+  border-bottom-color: color-mix(in srgb, var(--sw-accent) 62%, var(--sw-line));
+  color: var(--sw-text);
+}
+
+.specwright-intro-status-row[data-active="true"]::after {
+  content: "NU";
+  justify-self: end;
+  color: var(--sw-accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: calc(10px * var(--sw-ui-scale));
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.specwright-intro-status-row[data-active="true"] span:first-child {
+  color: var(--sw-accent);
+}
+
+.specwright-intro-status-row[data-done="true"] {
+  color: var(--sw-text-subtle);
+}
+
+.specwright-intro-status-row[data-done="true"]::after {
+  content: "OK";
+  justify-self: end;
+  color: var(--sw-success);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: calc(10px * var(--sw-ui-scale));
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.specwright-intro-status-row:nth-child(1) { animation-delay: 160ms; }
+.specwright-intro-status-row:nth-child(2) { animation-delay: 220ms; }
+.specwright-intro-status-row:nth-child(3) { animation-delay: 280ms; }
+
+.specwright-intro-status-row span:first-child {
+  color: var(--sw-text-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: calc(11px * var(--sw-ui-scale));
+  font-weight: 700;
+}
+
+.specwright-intro-bar {
+  height: 2px;
+  margin-top: var(--sw-space-4);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--sw-text-subtle) 18%, transparent);
+  animation: introStatusArrive 420ms 340ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: var(--sw-accent);
+  animation: introBarRun var(--intro-duration, 5200ms) var(--intro-delay, 180ms) cubic-bezier(.28, .08, .12, 1) both;
+}
+
+.specwright-intro-facts {
+  position: relative;
+  min-height: calc(62px * var(--sw-ui-scale));
+  margin-top: var(--sw-space-4);
+  overflow: hidden;
+  color: var(--sw-text);
+  font-size: calc(13px * var(--sw-ui-scale));
+  line-height: 1.5;
+  animation: introStatusArrive 420ms 360ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.specwright-intro-facts span {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: introFactCycle var(--intro-duration, 5200ms) infinite;
+}
+
+.specwright-intro-facts span:nth-child(2) { animation-delay: calc(var(--intro-duration, 5200ms) * .2); }
+.specwright-intro-facts span:nth-child(3) { animation-delay: calc(var(--intro-duration, 5200ms) * .4); }
+.specwright-intro-facts span:nth-child(4) { animation-delay: calc(var(--intro-duration, 5200ms) * .6); }
+.specwright-intro-facts span:nth-child(5) { animation-delay: calc(var(--intro-duration, 5200ms) * .8); }
+
+.specwright-intro-note {
+  margin: var(--sw-space-2) 0 0;
+  color: var(--sw-text-subtle);
+  font-size: calc(12px * var(--sw-ui-scale));
+  line-height: 1.6;
+  animation: introStatusArrive 420ms 400ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+@keyframes introCardArrive {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes introContentArrive {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes introStatusArrive {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes introMarkSettle {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes introBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes introBarRun {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes introFactCycle {
+  0%, 7% { opacity: 0; transform: translateY(4px); }
+  10%, 18% { opacity: 1; transform: translateY(0); }
+  22%, 100% { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes introBlueprintScan {
+  0%, 18% { opacity: 0; transform: translateX(-100%); }
+  36%, 62% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
+@keyframes introLineDraw {
+  from { stroke-dashoffset: 520; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes introExit {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-6px); }
+}
+
+@media (max-width: 720px) {
+  .specwright-intro-card {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+    overflow-y: auto;
+  }
+
+  .specwright-intro-rail {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .specwright-intro-rail span:nth-child(3),
+  .specwright-intro-rail span:nth-child(4) {
+    display: none;
+  }
+
+  .specwright-intro-brand,
+  .specwright-intro-status {
+    padding: var(--sw-space-6);
+  }
+
+  .specwright-intro-status {
+    grid-row: auto;
+    grid-column: auto;
+    border-top: var(--sw-border-width) solid var(--sw-line);
+    border-left: 0;
+  }
+
+  .specwright-intro-brand {
+    border-right: 0;
+  }
+
+  .specwright-intro-title {
+    max-width: 10ch;
+    font-size: clamp(36px, 13vw, 52px);
+  }
+}
+
+@media (max-width: 1180px), (max-height: 760px) {
+  .specwright-intro-card {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+    width: min(calc(760px * var(--sw-ui-scale)), calc(100vw - (var(--sw-modal-gutter) * 2)));
+    overflow-y: auto;
+  }
+
+  .specwright-intro-brand {
+    border-right: 0;
+    border-bottom: var(--sw-border-width) solid var(--sw-line);
+    gap: var(--sw-space-5);
+  }
+
+  .specwright-intro-diagram,
+  .specwright-intro-blueprint {
+    display: none;
+  }
+
+  .specwright-intro-status {
+    grid-row: auto;
+    grid-column: auto;
+    min-height: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .specwright-intro,
+  .specwright-intro-card,
+  .specwright-intro-mark,
+  .specwright-intro-mode,
+  .specwright-intro-kicker,
+  .specwright-intro-title,
+  .specwright-intro-rail,
+  .specwright-intro-diagram,
+  .specwright-intro-diagram-lines path,
+  .specwright-intro-blueprint,
+  .specwright-intro-blueprint span::after,
+  .specwright-intro-status-row,
+  .specwright-intro-bar,
+  .specwright-intro-facts,
+  .specwright-intro-facts span,
+  .specwright-intro-note {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+}

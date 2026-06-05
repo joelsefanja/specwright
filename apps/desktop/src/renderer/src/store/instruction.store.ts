@@ -11,6 +11,14 @@ export interface InstructionCard {
   pageURL: string;
   steps: string[];
   filePath: string;
+  gitlabSource?: {
+    filePath: string;
+    iid: string;
+    ref: string;
+    repo?: string;
+    title: string;
+    updatedAt?: string;
+  };
   suitName: string;
   jiraURL: string;
   explore: boolean;
@@ -54,9 +62,20 @@ function defaultCard(): InstructionCard {
     jiraURL: "",
     explore: true,
     runExploredCases: false,
-    runGeneratedCases: true,
+    runGeneratedCases: false,
     autoApprove: false,
   };
+}
+
+function slugify(value: string): string {
+  const slug = value
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return slug || "test-goal";
 }
 
 export const useInstructionStore = create<InstructionState>((set, get) => ({
@@ -136,6 +155,23 @@ export const useInstructionStore = create<InstructionState>((set, get) => ({
   },
 
   serialize: () => {
-    return get().cards.map(({ id: _id, ...rest }) => rest);
+    return get().cards
+      .map(({ id: _id, ...card }, index) => {
+        const rawModuleName = card.moduleName.trim().replace(/^@+/, "") || `TestGoal${index + 1}`;
+        const moduleName = `@${rawModuleName}`;
+        const steps = card.steps.map((step) => step.trim()).filter(Boolean);
+        return {
+          ...card,
+          moduleName,
+          fileName: card.fileName.trim() || slugify(rawModuleName),
+          pageURL: card.pageURL.trim(),
+          subModules: card.subModules.map((tag) => tag.trim()).filter(Boolean),
+          steps,
+          filePath: card.filePath.trim(),
+          suitName: card.suitName.trim(),
+          jiraURL: "",
+        };
+      })
+      .filter((card) => card.steps.length > 0 || Boolean(card.filePath));
   },
 }));

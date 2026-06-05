@@ -86,7 +86,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       const envVars = await window.specwright.project.readEnv(projectPath);
       set({ projectPath, projectState: "ready", envVars, loaded: true });
     } else {
-      set({ projectPath, projectState: "none", loaded: true });
+      set({ loaded: true });
+      await get().bootstrapAt(projectPath, "none");
     }
   },
 
@@ -138,7 +139,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     await window.specwright.project.setPath(folderPath);
     const isReady = await window.specwright.project.isBootstrapped(folderPath);
     if (!isReady) {
-      set({ projectPath: folderPath, projectState: "none" });
+      await get().bootstrapAt(folderPath, "none");
       return;
     }
     const envVars = await window.specwright.project.readEnv(folderPath);

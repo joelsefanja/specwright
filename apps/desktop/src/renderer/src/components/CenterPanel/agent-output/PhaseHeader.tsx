@@ -9,7 +9,7 @@ export function PhaseHeader({ phase, isActive }: { phase: Phase; isActive: boole
     if (phase.status === "running") {
       return (
         <span className="text-[var(--sw-accent)] text-[11px] font-medium flex items-center gap-1">
-          <span className="w-2.5 h-2.5 border-[1.5px] border-brand-400 border-t-transparent animate-spin" />
+          <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.5px] border-brand-400 border-t-transparent" />
           Running
         </span>
       );

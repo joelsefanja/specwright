@@ -1,5 +1,7 @@
 import React, { useState, useRef } from "react";
+import { PuzzlePiece } from "@phosphor-icons/react";
 import type { PluginSource } from "@renderer/store/config.store";
+import { ModalShell, StatusPill } from "../ui";
 
 type PluginTab = "local" | "npm";
 
@@ -55,49 +57,47 @@ export function PluginPickerModal({
     }
   };
 
-  // Only close on backdrop CLICK (not mousedown / mouseup / drag-release).
-  // Prevents accidental dismissal when a click started inside the modal
-  // but the mouse drifted onto the backdrop before release.
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
-  // Stop keyboard events (Backspace, Delete, etc.) from bubbling out of the
-  // modal — defensive guard against any parent / global key handlers that
-  // might interpret unhandled keystrokes as a close action.
-  // Escape inside the modal closes it explicitly.
-  const handleModalKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    e.stopPropagation();
-  };
+  const footer = (
+    <div className="flex w-full items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={() => { onReset(); onClose(); }}
+        className="operator-button-quiet px-2 py-1"
+      >
+        Use Specwright default
+      </button>
+      <div className="flex gap-2">
+        <button type="button" onClick={onClose} className="operator-button">
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleApply}
+          disabled={!canApply}
+          className="operator-button-primary disabled:opacity-40"
+        >
+          Use plugin
+        </button>
+      </div>
+    </div>
+  );
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onMouseDown={handleBackdropClick}
+    <ModalShell
+      title="Choose test framework plugin"
+      description="A plugin installs the Playwright BDD files, agents, skills, and app-specific helper code for this project."
+      icon={<PuzzlePiece size={18} weight="duotone" />}
+      size="lg"
+      footer={footer}
+      onOpenChange={(open) => { if (!open) onClose(); }}
     >
-      <div
-        className="operator-panel operator-plugin-modal operator-modal-md border shadow-2xl"
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleModalKeyDown}
-      >
-        <div className="flex items-start justify-between gap-4 px-4 py-3 border-b border-operator-line">
-          <div className="min-w-0">
-            <h2 className="operator-plugin-title">Choose test framework plugin</h2>
-            <p className="operator-plugin-description">A plugin is the project adapter: it installs Playwright BDD files, agents, skills, and app-specific helper code.</p>
-          </div>
-          <button onClick={onClose} className="operator-button-quiet px-2 py-1 shrink-0">Close</button>
-        </div>
-
-        <div className="flex border-b border-operator-line">
+        <div className="operator-plugin-tabs" role="tablist" aria-label="Plugin source">
           {(["local", "npm"] as PluginTab[]).map((t) => (
             <button
               key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
               onClick={() => setTab(t)}
               className={`operator-plugin-tab ${tab === t ? "operator-plugin-tab-active" : ""}`}
             >
@@ -106,10 +106,10 @@ export function PluginPickerModal({
           ))}
         </div>
 
-        <div className="px-4 py-3 space-y-3">
+        <div className="space-y-3">
           {tab === "local" && (
             <>
-              <p className="operator-plugin-description">Use this when your team has a custom project adapter in another repo. Select the folder that contains <span className="font-mono">specwright.plugin.json</span>.</p>
+              <p className="operator-plugin-description">Use this when your team has its own test setup. Choose the folder that contains <span className="font-mono">specwright.plugin.json</span>.</p>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -128,9 +128,9 @@ export function PluginPickerModal({
               {validating && <p className="operator-plugin-description">Checking plugin folder...</p>}
               {!validating && localValidation && (
                 localValidation.valid ? (
-                   <p className="text-[var(--sw-success)] text-xs">Valid plugin: <span className="font-mono">{localValidation.pluginName}</span></p>
+                   <StatusPill status="success" dot>Valid plugin: {localValidation.pluginName}</StatusPill>
                 ) : (
-                  <p className="operator-danger text-xs">{localValidation.error}</p>
+                  <StatusPill status="danger" dot>{localValidation.error}</StatusPill>
                 )
               )}
             </>
@@ -163,28 +163,6 @@ export function PluginPickerModal({
             </>
           )}
         </div>
-
-        <div className="flex items-center justify-between px-4 py-3 border-t border-operator-line">
-              <button
-                onClick={() => { onReset(); onClose(); }}
-                className="operator-button-quiet px-2 py-1"
-              >
-            Use Specwright default
-          </button>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="operator-button">
-              Cancel
-            </button>
-            <button
-              onClick={handleApply}
-              disabled={!canApply}
-              className="operator-button-primary disabled:opacity-40"
-            >
-              Use plugin
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

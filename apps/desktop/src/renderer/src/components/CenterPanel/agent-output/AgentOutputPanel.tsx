@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, useReducer } from "react";
-import { Copy, Pause, PaperPlaneTilt } from "@phosphor-icons/react";
+import { Pause, PaperPlaneTilt } from "@phosphor-icons/react";
 import PermissionPrompt from "./PermissionPrompt";
-import { PhaseHeader } from "./PhaseHeader";
 import { RunConsolePanel } from "./RunConsolePanel";
+import { MessageGroup } from "./MessageGroup";
 import { usePipelineStore, type ChatMessage } from "@renderer/store/pipeline.store";
 import { useConfigStore } from "@renderer/store/config.store";
 
@@ -32,34 +32,6 @@ function groupMessagesByPhase(messages: ChatMessage[]): PhaseGroup[] {
     }
   }
   return groups;
-}
-
-// ── URL-aware text renderer ────────────────────────────────────────────────────
-const URL_REGEX = /https?:\/\/[^\s)>\]'"\\]+/g;
-
-function renderWithLinks(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  URL_REGEX.lastIndex = 0;
-  while ((match = URL_REGEX.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-    const url = match[0];
-    parts.push(
-      <a
-        key={match.index}
-        href="#"
-        onClick={(e) => { e.preventDefault(); window.specwright.shell.openUrl(url); }}
-        className="text-brand-400 hover:text-brand-300 underline decoration-brand-700 hover:decoration-brand-400 cursor-pointer transition-colors"
-        title={`Open ${url}`}
-      >
-        {url}
-      </a>
-    );
-    lastIndex = match.index + url.length;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : <>{parts}</>;
 }
 
 // ── Agent output panel ────────────────────────────────────────────────────────
@@ -132,33 +104,33 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
     : activeTool
       ? activeTool
       : isRunning
-        ? "Run in progress"
+        ? "Test wordt gemaakt"
         : status === "done"
-          ? "Run complete"
+          ? "Klaar"
           : status === "aborted"
-            ? "Run aborted"
+            ? "Gestopt"
             : status === "error"
-              ? "Run failed"
-              : "Session";
+              ? "Niet gelukt"
+              : "Status";
   const runStatusDetail = abortRequested
-    ? "Specwright is stopping the active process. This can take a few seconds."
+    ? "Specwright stopt. Dit kan een paar seconden duren."
     : activeTool
-      ? "A tool or command is active. Raw output appears in Run output."
+      ? "Specwright is bezig. Details staan bij Uitvoer."
       : isRunning
-        ? "Specwright is generating, running, or waiting for the current command."
-        : status === "done"
-          ? "Review the result, run tests, or return to Explorer."
-          : status === "aborted"
-            ? "The run was stopped. Return to Create Tests when you want to continue."
-            : status === "error"
-              ? errorMessage ?? "Check Run output for the failing command."
-              : "No active run.";
+        ? "Specwright werkt aan je test."
+      : status === "done"
+          ? "Bekijk het resultaat of pas je test aan."
+        : status === "aborted"
+            ? "De run is gestopt. Je kunt later verdergaan."
+          : status === "error"
+              ? errorMessage ?? "Bekijk de uitvoer voor wat misging."
+              : "Nog niets gestart.";
 
   const requestAbort = useCallback(async (): Promise<boolean> => {
     setAbortRequested(true);
-    setControlFeedback("Abort requested...");
+    setControlFeedback("Stoppen aangevraagd...");
     const result = await window.specwright.pipeline.abort() as unknown as { ok?: boolean };
-    setControlFeedback(result.ok ? "Stopping run..." : "Nothing to abort");
+    setControlFeedback(result.ok ? "Run stoppen..." : "Er draait niets");
     if (!result.ok) setAbortRequested(false);
     return Boolean(result.ok);
   }, []);
@@ -167,7 +139,7 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
     abortBackRequestedRef.current = true;
     const requested = await requestAbort();
     if (requested) {
-      setControlFeedback("Stopping run, then returning to Create Tests...");
+      setControlFeedback("Run stoppen en terug naar test maken...");
       return;
     }
     abortBackRequestedRef.current = false;
@@ -188,17 +160,23 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
     return () => window.clearTimeout(timer);
   }, [controlFeedback]);
 
-  const handleCopy = useCallback((id: string, text: string) => {
-    if (!text) return;
+  const onCopyMessage = useCallback((id: string, text: string) => {
+    if (!text) {
+      return;
+    }
+
     navigator.clipboard.writeText(text).then(() => {
       setCopied(id);
       setTimeout(() => setCopied(null), 2000);
     });
   }, []);
 
-  const handleSend = useCallback(async () => {
+  const onSend = useCallback(async () => {
     const text = inputText.trim();
-    if (!text) return;
+    if (!text) {
+      return;
+    }
+
     setInputText("");
     inputRef.current?.focus();
 
@@ -266,12 +244,12 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
     }
   }, [inputText, isRunning, injectUserMessage]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      onSend();
     }
-  }, [handleSend]);
+  }, [onSend]);
 
   return (
     <div className="operator-run-view flex flex-col h-full overflow-hidden">
@@ -357,92 +335,30 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             <p className="operator-label operator-text-accent">Session</p>
               <p className="operator-field-help">
                 {isRunning
-                  ? "Follow the active phase here. If a browser/test command is running, the right Run output panel shows the raw command stream."
-                  : "Review the generated summary here, then run tests or go back to Create Tests to adjust the instructions."}
+                  ? "Volg hier wat Specwright doet. Details staan bij Uitvoer."
+                  : "Bekijk het resultaat of pas je test aan."}
             </p>
           </div>
         )}
         {isRunning && messages.length === 0 && (
           <div className="flex items-center gap-3 text-stone-500 text-sm">
-            <span className="w-4 h-4 border-2 border-brand-500 border-t-transparent animate-spin" />
-            Establishing session… (may take 15–20s with a large system prompt)
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+            Specwright wordt gestart...
           </div>
         )}
 
-        {groupMessagesByPhase(messages).map((group, groupIdx) => {
-          const phase = group.phaseId ? phases.find((p) => p.id === group.phaseId) ?? null : null;
-          const isActivePhase = phase?.status === "running";
-
-          const messageBubbles = group.messages.map((msg) => {
-            if (msg.role === "user") {
-              return (
-                <div key={msg.id} className="flex justify-end">
-                  <div className="border border-[color-mix(in_srgb,var(--sw-accent)_36%,transparent)] bg-[var(--sw-accent-soft)] px-4 py-2 max-w-[85%]">
-                    <p className="operator-message-user-text whitespace-pre-wrap select-text cursor-text">{msg.content}</p>
-                  </div>
-                </div>
-              );
-            }
-
-            return (
-              <div key={msg.id} className="group/msg relative">
-                {msg.content ? (
-                  <pre className="operator-message-text whitespace-pre-wrap break-words font-sans m-0 select-text cursor-text">
-                    {renderWithLinks(displayedText.current.get(msg.id) ?? msg.content)}
-                    {msg.isStreaming && !activeTool && (
-                      <span className="inline-block w-0.5 h-4 bg-brand-400 ml-0.5 align-middle animate-pulse" />
-                    )}
-                  </pre>
-                ) : msg.isStreaming ? (
-                  <span className="flex gap-1 items-center h-5">
-                    <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:0ms]" />
-                    <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:300ms]" />
-                  </span>
-                ) : null}
-                {msg.isStreaming && activeTool && (
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-operator-line">
-                    <span className="w-3 h-3 border-2 border-[var(--sw-accent)] border-t-transparent animate-spin" />
-                    <span className="operator-text-accent text-xs font-mono">{activeTool}</span>
-                    <span className="operator-text-subtle text-xs">running</span>
-                  </div>
-                )}
-                {msg.content && (
-                  <button
-                    onClick={() => handleCopy(msg.id, msg.content)}
-                    className="absolute top-0 right-0 opacity-0 group-hover/msg:opacity-100 operator-muted hover:text-operator-ink text-xs border border-operator-line hover:border-operator-line-strong px-2 py-1 bg-operator-canvas transition-all"
-                  >
-                    {copied === msg.id ? "Copied" : <><Copy className="operator-icon" weight="bold" /> Copy</>}
-                  </button>
-                )}
-              </div>
-            );
-          });
-
-          if (phase) {
-            return (
-              <div
-                key={`phase-group-${group.phaseId}-${groupIdx}`}
-                className={`border overflow-hidden ${
-                  isActivePhase ? "border-brand-700/70" : "border-stone-800"
-                }`}
-              >
-                <PhaseHeader phase={phase} isActive={isActivePhase} />
-                {group.messages.some((m) => m.content || m.isStreaming) && (
-                  <div className="px-5 py-4 space-y-3 bg-operator-panel/70">
-                    {messageBubbles}
-                  </div>
-                )}
-              </div>
-            );
-          }
-
-          return (
-            <div key={`unphased-${groupIdx}`} className="space-y-3">
-              {messageBubbles}
-            </div>
-          );
-        })}
+        {groupMessagesByPhase(messages).map((group, groupIndex) => (
+          <MessageGroup
+            key={group.phaseId ? `phase-group-${group.phaseId}-${groupIndex}` : `unphased-${groupIndex}`}
+            activeTool={activeTool}
+            copiedMessageId={copied}
+            displayedText={displayedText.current}
+            group={group}
+            groupIndex={groupIndex}
+            onCopyMessage={onCopyMessage}
+            phases={phases}
+          />
+        ))}
 
         <PermissionPrompt />
         <div ref={bottomRef} />
@@ -456,15 +372,15 @@ export function AgentOutputPanel({ onOpenRunPicker }: { onOpenRunPicker: () => v
             ref={inputRef}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Send a message to guide the agent… (Enter to send, Shift+Enter for newline)"
+            onKeyDown={onComposerKeyDown}
+            placeholder="Geef extra aanwijzingen..."
             rows={2}
             className="operator-field flex-1 resize-none px-3 py-2 text-[13.5px] placeholder-stone-600"
           />
           <button
-            onClick={handleSend}
+            onClick={onSend}
             disabled={!inputText.trim()}
-            className="operator-button-primary self-stretch flex-shrink-0"
+            className="operator-button-primary flex-shrink-0"
           >
             <PaperPlaneTilt className="operator-icon" weight="fill" /> Send
           </button>

@@ -1,0 +1,63 @@
+@keyframes operatorMenuIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.operator-titlebar-select {
+    position: relative;
+  }
+
+.operator-titlebar-select-trigger {
+    min-height: 28px;
+    min-width: 42px;
+    gap: 5px;
+    border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 62%, transparent);
+    background: color-mix(in srgb, var(--sw-surface) 72%, transparent);
+    color: var(--sw-text-muted);
+    border-radius: calc(var(--sw-radius-control) - 2px);
+    padding: 0 7px;
+    font-size: 12px;
+    box-shadow: none;
+    @apply inline-flex items-center justify-between outline-none transition-colors;
+  }
+
+  .operator-titlebar-select-trigger:hover,
+  .operator-titlebar-select-trigger[aria-expanded="true"],
+  .operator-titlebar-select-trigger:focus-visible {
+    border-color: color-mix(in srgb, var(--sw-accent) 38%, var(--sw-line));
+    background: color-mix(in srgb, var(--sw-accent) 8%, var(--sw-surface));
+    color: var(--sw-text);
+  }
+
+.operator-titlebar-select-menu {
+    top: calc(100% + 6px);
+    min-width: 100%;
+    background: color-mix(in srgb, var(--sw-surface) 96%, var(--sw-bg));
+    border: var(--sw-border-width) solid var(--sw-line);
+    border-radius: var(--sw-radius-surface);
+    box-shadow: 0 16px 34px color-mix(in srgb, var(--sw-bg) 48%, transparent);
+    padding: 4px;
+    transform-origin: top;
+    animation: operatorMenuIn var(--sw-motion) var(--sw-motion-ease) both;
+    @apply absolute left-0 z-[220] overflow-hidden;
+  }
+
+.operator-titlebar-select-option {
+    min-width: 100%;
+    color: var(--sw-text-muted);
+    border-radius: var(--sw-radius-pill);
+    min-height: 28px;
+    padding: 6px 10px;
+    font-size: 12px;
+    @apply block whitespace-nowrap text-left transition-colors;
+  }
+
+  .operator-titlebar-select-option:hover,
+  .operator-titlebar-select-option[data-selected="true"] {
+    background: color-mix(in srgb, var(--sw-accent) 10%, transparent);
+    color: var(--sw-text);
+  }
+
+  .operator-titlebar-select-option[data-selected="true"] {
+    font-weight: 700;
+  }

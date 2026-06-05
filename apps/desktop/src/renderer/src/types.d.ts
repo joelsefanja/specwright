@@ -58,11 +58,45 @@ interface NetworkAPI {
   verifyEndpoint: (baseUrl: string) => Promise<{ ok: boolean; message: string }>;
 }
 
+type RequirementStatus = "pass" | "fail" | "warning";
+type RequirementInstallAction = "project-dependencies" | "playwright-chromium";
+
+interface RequirementCheck {
+  key: "node" | "npm" | "package-manager" | "project-bootstrap" | "node-modules" | "playwright-cli" | "playwright-chromium" | "opencode-cli" | "opencode-server" | "glab";
+  status: RequirementStatus;
+  message: string;
+  detail?: string;
+  blocksRun: boolean;
+  installAction?: RequirementInstallAction;
+}
+
+interface RequirementsResult {
+  projectPath: string;
+  ready: boolean;
+  checks: RequirementCheck[];
+}
+
+interface RequirementsAPI {
+  check: (projectPath: string) => Promise<RequirementsResult>;
+  install: (payload: { projectPath: string; action: RequirementInstallAction }) => Promise<{ ok: boolean; error?: string }>;
+  onInstallLog: (cb: (data: { line: string }) => void) => () => void;
+}
+
 interface ReportAPI {
-  checkAvailable: (projectPath: string) => Promise<{ playwright: boolean; bdd: boolean }>;
+  checkAvailable: (projectPath: string) => Promise<{ playwright: boolean; bdd: boolean; allure: boolean }>;
   openPlaywright: (projectPath: string) => Promise<void>;
   openBdd: (projectPath: string) => Promise<void>;
+  openAllure: (projectPath: string) => Promise<void>;
   startTestReport: (projectPath: string) => Promise<{ url: string }>;
+}
+
+interface RunsAPI {
+  list: (projectPath?: string) => Promise<unknown[]>;
+  inspect: (runId: string, projectPath?: string) => Promise<unknown>;
+  logs: (runId: string, projectPath?: string) => Promise<string>;
+  diff: (runId: string, projectPath?: string) => Promise<{ diff: string; changedFiles: string[] }>;
+  abort: (runId: string, projectPath?: string) => Promise<unknown>;
+  respondPermission: (payload: { runId: string; permissionId: string; allowed: boolean; optionId?: string; projectPath?: string }) => Promise<unknown>;
 }
 
 interface WindowControlsAPI {
@@ -96,7 +130,7 @@ interface SpecwrightAPI {
     fetchGitLabIssue: (folderPath: string, issueRef: string) => Promise<{ filePath: string; title: string; updatedAt: string; changed: boolean }>;
     listGitLabItems: (folderPath: string, mode?: "assigned" | "project") => Promise<{ repo: string; username?: string | null; items: GitLabItem[]; errors: string[] }>;
     gitLabStatus: (folderPath: string) => Promise<{ hasGlab: boolean; authenticated: boolean; repo?: string; username?: string | null; error?: string }>;
-    readGitLabSource: (folderPath: string, relativePath: string) => Promise<{ markdown: string; images: string[] }>;
+    readGitLabSource: (folderPath: string, relativePath: string) => Promise<{ markdown: string; images: string[]; missing?: boolean }>;
     bootstrap: (folderPath: string, options?: { skipAuth?: boolean; authStrategy?: string; overlay?: PluginSource }) => Promise<BootstrapResult>;
     validatePlugin: (dirPath: string) => Promise<PluginValidationResult>;
     detectPlugin: (folderPath: string) => Promise<PluginInfo>;
@@ -122,6 +156,7 @@ interface SpecwrightAPI {
       userMessage: string;
       mode?: "claude-code";
       skipPermissions?: boolean;
+      resumeSessionId?: string;
     }) => Promise<void>;
     abort: () => Promise<{ ok: boolean; state?: string }>;
     interrupt: () => Promise<{ ok: boolean; reason?: string }>;
@@ -153,7 +188,9 @@ interface SpecwrightAPI {
   shell: ShellAPI;
   window: WindowControlsAPI;
   network: NetworkAPI;
+  requirements: RequirementsAPI;
   report: ReportAPI;
+  runs: RunsAPI;
   opencode: {
     health: (baseUrl: string) => Promise<{ ok: boolean }>;
     detectModel: (baseUrl: string) => Promise<{ modelId: string; providerId: string } | null>;
@@ -161,6 +198,13 @@ interface SpecwrightAPI {
     startServer: (port?: number) => Promise<{ ok: boolean; error?: string }>;
     stopServer: () => Promise<{ ok: boolean }>;
     serverStatus: () => Promise<{ running: boolean }>;
+    openAttachTerminal: (payload: { baseUrl: string; sessionId: string; cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
+    startAttachStream: (payload: { attachId?: string; baseUrl: string; sessionId: string; cwd?: string }) => Promise<{ ok: boolean; attachId?: string; error?: string }>;
+    stopAttachStream: (attachId: string) => Promise<{ ok: boolean }>;
+    sendAttachInput: (payload: { attachId: string; input: string }) => Promise<{ ok: boolean; error?: string }>;
+    resizeAttachStream: (payload: { attachId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
+    onAttachOutput: (cb: (data: { attachId: string; stream: "stdout" | "stderr"; chunk: string }) => void) => () => void;
+    onAttachExit: (cb: (data: { attachId: string; code: number | null; error?: string }) => void) => () => void;
   };
   app: {
     getVersion: () => Promise<string>;
@@ -172,6 +216,17 @@ interface SpecwrightAPI {
     status: () => Promise<{ status: "idle" | "connected" | "needs-auth" }>;
     connect: () => Promise<{ success: boolean; error?: string }>;
     disconnect: () => Promise<{ success: boolean }>;
+  };
+  devFeedback?: {
+    isE2E?: boolean;
+    captureScreenshot: (rect?: { x: number; y: number; width: number; height: number }) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
+    run: (payload: { id?: string; prompt: string }) => Promise<{ ok: boolean; id?: string; worktreePath?: string; error?: string }>;
+    applyWorktree: (payload: { worktreePath: string }) => Promise<{ ok: boolean; applied?: boolean; error?: string; errorCode?: "patch-conflict" | "apply-failed" }>;
+    cancel: (payload: { id: string }) => Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
+    onToken: (cb: (data: { id?: string; token: string }) => void) => () => void;
+    onLog: (cb: (data: { id?: string; line: string }) => void) => () => void;
+    onDone: (cb: (data: { id?: string; fullText: string; worktreePath?: string }) => void) => () => void;
+    onError: (cb: (data: { id?: string; error: string }) => void) => () => void;
   };
 }
 

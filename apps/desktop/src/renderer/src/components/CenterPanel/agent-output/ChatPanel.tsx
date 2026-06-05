@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { usePipelineStore, type ChatMessage } from "@renderer/store/pipeline.store";
 import { useConfigStore } from "@renderer/store/config.store";
 import PermissionPrompt from "./PermissionPrompt";
+import { StreamingCursor, StreamingDots } from "./StreamingIndicators";
 
 // --- Individual message bubble ---
 function MessageBubble({ msg }: { msg: ChatMessage }): React.JSX.Element {
@@ -29,17 +30,12 @@ function MessageBubble({ msg }: { msg: ChatMessage }): React.JSX.Element {
               {msg.content}
             </pre>
           ) : (
-            /* Streaming placeholder — three pulsing dots */
-            <span className="flex gap-1 items-center h-4">
-              <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 bg-stone-400 animate-bounce [animation-delay:300ms]" />
-            </span>
+            <StreamingDots className="h-4" />
           )}
 
           {/* Blinking cursor while streaming */}
           {msg.isStreaming && msg.content && (
-            <span className="inline-block w-0.5 h-3.5 bg-brand-400 ml-0.5 align-middle animate-pulse" />
+            <StreamingCursor className="h-3.5" />
           )}
         </div>
       </div>

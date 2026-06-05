@@ -4,7 +4,7 @@ import { Play, Plus } from "@phosphor-icons/react";
 import { useConfigStore } from "@renderer/store/config.store";
 import { useInstructionStore } from "@renderer/store/instruction.store";
 import { usePipelineStore } from "@renderer/store/pipeline.store";
-import InstructionCard from "./InstructionCard";
+import InstructionCard from "./instruction-card";
 import { ContextHeader, EmptyState } from "../common/Discoverability";
 
 const instructionsCache = new Map<string, object[]>();
@@ -13,27 +13,31 @@ const instructionsInflight = new Map<string, Promise<object[]>>();
 export default function InstructionsBuilder(): React.JSX.Element {
   const { projectPath, envVars } = useConfigStore();
   const { cards, addCard, clearAll, serialize, loadCards } = useInstructionStore();
-  const { status, startRun, setError, atlassianStatus } = usePipelineStore();
+  const { status, startRun, setError } = usePipelineStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [suppressCardMotion, setSuppressCardMotion] = useState(false);
-  const showJiraSource = envVars.SPECWRIGHT_SHOW_JIRA_SOURCE === "true";
 
   // isRunning is true while submitting OR while the pipeline store says running
   const isRunning = isSubmitting || status === "running";
 
-  // Generate requires at least one card with a module name and at least one non-empty step or a Jira URL
+  // Generate requires at least one card with a module name and content.
   const hasValidCard = cards.some(
-    (c) => c.moduleName.trim() && (c.steps.some((s) => s.trim()) || c.jiraURL?.trim() || c.filePath?.trim())
+    (c) => c.moduleName.trim() && (c.steps.some((s) => s.trim()) || c.filePath?.trim())
   );
-
-  // If any card uses a Jira URL, Atlassian must be connected
-  const hasJiraCard = showJiraSource && cards.some((c) => c.jiraURL?.trim());
-  const jiraNeedsAuth = hasJiraCard && atlassianStatus !== "connected";
 
   // If auth is oauth and required, email must be filled
   const authStrategy = (envVars.AUTH_STRATEGY || "none") as string;
   const authNeedsEmail = authStrategy === "oauth" && !envVars.TEST_USER_EMAIL?.trim();
-  const canGenerate = hasValidCard && !authNeedsEmail && !jiraNeedsAuth;
+  const canGenerate = hasValidCard && !authNeedsEmail;
+  const generateBlockedReason = isRunning
+    ? "Wacht tot de huidige run klaar is."
+    : !projectPath
+      ? "Kies eerst een projectmap."
+      : authNeedsEmail
+        ? "Vul eerst het OAuth e-mailadres in."
+        : !hasValidCard
+          ? "Beschrijf eerst minimaal één scenario met app-deel en stappen of bron."
+          : "";
 
   const handleDiscard = (): void => {
     setSuppressCardMotion(true);
@@ -144,15 +148,15 @@ export default function InstructionsBuilder(): React.JSX.Element {
       {/* Instruction cards — scrollable */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollable px-5 pt-5 pb-4 space-y-3 bg-operator-canvas">
         <ContextHeader
-          eyebrow="Create Tests"
-          title="Create a test brief"
-          description="Name the module, choose the page or workflow, then add one source of context: GitLab issue, uploaded file, or written steps."
+          eyebrow="Test maken"
+          title="Beschrijf een test"
+          description="Geef aan wat de gebruiker moet kunnen doen. Voeg daarna een ticket, bestand of eigen beschrijving toe."
         />
         {cards.length === 0 && (
           <EmptyState
-            title="No instructions yet"
-            description="Start with a template from the right rail, or create a custom instruction for the page or workflow you want covered."
-            action={<button onClick={addCard} className="operator-button-primary gap-2"><Plus className="operator-icon" weight="bold" /> Add instruction</button>}
+            title="Nog geen test beschreven"
+            description="Begin met één scenario. Je kunt later extra tests toevoegen."
+            action={<button onClick={addCard} className="operator-button-primary gap-2"><Plus className="operator-icon" weight="bold" /> Scenario toevoegen</button>}
           />
         )}
         {suppressCardMotion ? (
@@ -162,10 +166,10 @@ export default function InstructionsBuilder(): React.JSX.Element {
             {cards.map((card, i) => (
               <motion.div
                 key={card.id}
-                initial={{ opacity: 0, y: 14 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.42, delay: Math.min(i * 0.045, 0.22), ease: [0.16, 1, 0.3, 1] }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
               >
                 <InstructionCard card={card} index={i} />
               </motion.div>
@@ -179,13 +183,13 @@ export default function InstructionsBuilder(): React.JSX.Element {
         <div className="flex-shrink-0 px-4 py-2 border-t" style={{ background: "rgba(217,120,104,0.1)", borderColor: "rgba(217,120,104,0.45)" }}>
           <div className="flex items-center justify-between gap-2">
             <p className="operator-danger text-xs flex items-center gap-1">
-              <span className="operator-label operator-danger">Error</span> {saveError}
+              <span className="operator-label operator-danger">Niet gelukt</span> {saveError}
             </p>
             <button
               onClick={() => setSaveError(null)}
               className="operator-danger text-xs flex-shrink-0 opacity-70 hover:opacity-100"
             >
-              Close
+              Sluiten
             </button>
           </div>
         </div>
@@ -195,33 +199,34 @@ export default function InstructionsBuilder(): React.JSX.Element {
       <div className="operator-toolbar flex items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           {authNeedsEmail && (
-            <span className="operator-danger text-xs">OAuth email required</span>
+            <span className="operator-danger text-xs">OAuth e-mailadres nodig</span>
           )}
           <button
             onClick={handleDiscard}
             disabled={isRunning || cards.length === 0}
             className="operator-button operator-button-secondary hover:border-[var(--sw-danger)] hover:text-[var(--sw-danger)]"
           >
-            Discard
+            Wissen
           </button>
           <button
             onClick={handleGenerate}
             disabled={isRunning || !projectPath || !canGenerate}
-            title={jiraNeedsAuth ? "Connect Atlassian to use Jira URL" : undefined}
             className="operator-button-primary gap-2"
           >
             {isRunning ? (
               <>
-                <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent animate-spin" />
-                Running
+                <span className="operator-loading-spinner h-3.5 w-3.5" />
+                Bezig
               </>
             ) : (
               <>
-                <Play className="operator-icon" weight="fill" /> Generate
+                <Play className="operator-icon" weight="fill" /> Test maken
               </>
             )}
           </button>
         </div>
+        {cards.length === 0 && !isRunning && <p className="operator-field-help m-0">Voeg eerst een scenario toe voordat je kunt wissen.</p>}
+        {generateBlockedReason && <p className="operator-field-help m-0">{generateBlockedReason}</p>}
       </div>
     </div>
   );

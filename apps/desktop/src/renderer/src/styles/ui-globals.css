@@ -1,0 +1,581 @@
+/* Final shared UI layer. Keep page-specific styles from reintroducing outlined status pills. */
+.operator-loading-spinner {
+  @apply inline-block shrink-0 rounded-full animate-spin border-2 border-current border-t-transparent;
+}
+
+.operator-status-pill,
+.operator-project-ready,
+.operator-access-status,
+.operator-step-status,
+.operator-badge,
+.operator-readiness-ok,
+.operator-readiness-warn,
+.operator-extension-pill {
+  border-color: transparent !important;
+}
+
+.operator-status-pill-dot,
+.operator-status-dot {
+  border-radius: 999px !important;
+}
+
+.operator-badge,
+.operator-extension-pill {
+  background: color-mix(in srgb, var(--sw-accent) 10%, transparent);
+}
+
+.operator-readiness-ok,
+.operator-readiness-warn {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border: var(--sw-border-width) solid transparent;
+  border-radius: var(--sw-radius-pill);
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  padding: calc(var(--sw-space-1) * 0.75) var(--sw-space-2);
+  line-height: 1;
+}
+
+.operator-field,
+.operator-select,
+.operator-dropdown-trigger,
+.operator-prefixed-field,
+.operator-prefixed-select {
+  border-radius: var(--sw-radius-control) !important;
+}
+
+.operator-prefixed-field,
+.operator-prefixed-select {
+  overflow: hidden;
+}
+
+.operator-field-prefix {
+  align-self: stretch;
+  border-radius: var(--sw-radius-control) 0 0 var(--sw-radius-control);
+}
+
+.operator-field-suffix {
+  align-self: stretch;
+  border-radius: 0 var(--sw-radius-control) var(--sw-radius-control) 0;
+}
+
+.operator-field-prefixed,
+.operator-dropdown-trigger-prefixed {
+  border-radius: 0 !important;
+}
+
+textarea.operator-field,
+.operator-step-input {
+  min-height: calc(72px * var(--sw-ui-scale));
+  border-radius: var(--sw-radius-control) !important;
+  line-height: 1.45;
+}
+
+.operator-button,
+.operator-button-primary,
+.operator-icon-button,
+.operator-dropdown-trigger,
+.operator-source-option,
+.operator-readiness-row,
+.operator-selected-file-toggle,
+.operator-selected-clear {
+  cursor: pointer;
+}
+
+.operator-button,
+.operator-button-primary,
+.operator-dropdown-trigger,
+.operator-source-option,
+.operator-readiness-row,
+.operator-selected-file-toggle,
+.operator-selected-clear {
+  border-radius: var(--sw-radius-control) !important;
+}
+
+.operator-button:disabled,
+.operator-button-primary:disabled,
+.operator-dropdown-trigger:disabled,
+.operator-source-option:disabled,
+.operator-readiness-row:disabled {
+  cursor: not-allowed;
+}
+
+.operator-source-option-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sw-space-1);
+  width: fit-content;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sw-accent-strong);
+  padding: 0 !important;
+  font-size: var(--sw-font-size-label);
+  line-height: 1;
+  box-shadow: none;
+  font-weight: 800;
+}
+
+.operator-source-option-action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--sw-surface), 0 0 0 calc(3px * var(--sw-ui-scale)) color-mix(in srgb, var(--sw-accent) 18%, transparent);
+}
+
+.operator-workflow-coach {
+  display: grid;
+  gap: var(--sw-space-2);
+}
+
+.operator-workflow-coach-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--sw-space-2);
+  align-items: flex-start;
+}
+
+.operator-workflow-coach-actions .operator-button,
+.operator-workflow-coach-actions .operator-button-primary {
+  min-height: calc(36px * var(--sw-ui-scale));
+  padding: calc(var(--sw-control-y) * 0.72) calc(var(--sw-control-x) * 0.95) !important;
+  font-size: calc(13px * var(--sw-ui-scale));
+  line-height: 1;
+  box-shadow: none;
+}
+
+.operator-workflow-nav-action {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.operator-workflow-nav-help,
+.operator-workflow-step-help {
+  color: var(--sw-text-subtle);
+  font-size: calc(10.5px * var(--sw-ui-scale));
+  line-height: 1.2;
+}
+
+.operator-workflow-step-help {
+  display: block;
+  margin-top: 2px;
+  white-space: normal;
+}
+
+/* Teststudio redesign layer: task-first layout with bottom actions. */
+.operator-workflow-coach {
+  padding: var(--sw-space-3) clamp(20px, 2.6vw, calc(40px * var(--sw-ui-scale)));
+  background: color-mix(in srgb, var(--sw-bg) 92%, transparent);
+  border-bottom: var(--sw-border-width) solid var(--sw-line);
+  min-height: calc(92px * var(--sw-ui-scale));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  scrollbar-gutter: stable both-edges;
+}
+
+.operator-workflow-stepper {
+  width: min(100%, 1080px);
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: stretch;
+  align-items: center;
+  border: var(--sw-border-width) solid var(--sw-line);
+  border-radius: var(--sw-radius-pill);
+  background: color-mix(in srgb, var(--sw-surface) 70%, var(--sw-bg));
+  padding: calc(10px * var(--sw-ui-scale));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--sw-text) 4%, transparent);
+  gap: var(--sw-space-3);
+  margin-inline: auto;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+.operator-workflow-stepper > li {
+  min-width: 0;
+}
+
+.operator-workflow-step {
+  width: 100% !important;
+  min-height: max(54px, calc(46px * var(--sw-ui-scale))) !important;
+  border-radius: var(--sw-radius-pill) !important;
+  padding: var(--sw-space-2) var(--sw-space-2) !important;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.operator-workflow-step[data-step-status="active"],
+.operator-workflow-step[data-step-status="running"] {
+  background: color-mix(in srgb, var(--sw-accent) 10%, var(--sw-field));
+  box-shadow: inset 0 0 0 var(--sw-border-width) color-mix(in srgb, var(--sw-accent) 26%, transparent);
+}
+
+.operator-workflow-step[data-step-status="done"] {
+  background: color-mix(in srgb, var(--sw-success) 8%, var(--sw-field));
+  box-shadow: inset 0 0 0 var(--sw-border-width) color-mix(in srgb, var(--sw-success) 18%, transparent);
+}
+
+.operator-workflow-step[data-step-status="locked"] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.operator-workflow-step .operator-step-title {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  width: 100%;
+  max-width: 100%;
+  gap: var(--sw-space-2);
+  overflow: hidden;
+  white-space: normal;
+}
+
+.operator-workflow-step .operator-step-copy {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.operator-workflow-step .operator-step-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(22px * var(--sw-ui-scale));
+  height: calc(22px * var(--sw-ui-scale));
+  margin-left: 0;
+  border-radius: var(--sw-radius-pill);
+  color: var(--sw-text-subtle);
+  background: color-mix(in srgb, var(--sw-field) 78%, transparent);
+}
+
+@media (max-width: 980px) {
+  .operator-workflow-step .operator-step-status-icon {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .operator-workflow-stepper {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operator-workflow-step,
+  .operator-workflow-step .operator-step-title {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+.operator-workflow-step .operator-step-status-icon[data-status="active"],
+.operator-workflow-step .operator-step-status-icon[data-status="running"] {
+  color: var(--sw-accent-strong);
+  background: color-mix(in srgb, var(--sw-accent) 13%, transparent);
+}
+
+.operator-workflow-step .operator-step-status-icon[data-status="done"] {
+  color: color-mix(in srgb, var(--sw-success) 82%, var(--sw-text));
+  background: color-mix(in srgb, var(--sw-success) 12%, transparent);
+}
+
+.operator-workflow-step .operator-step-status-icon[data-status="locked"] {
+  color: var(--sw-text-subtle);
+  background: color-mix(in srgb, var(--sw-line) 34%, transparent);
+}
+
+.operator-workflow-active-frame {
+  border-radius: var(--sw-radius-pill);
+  background: color-mix(in srgb, var(--sw-accent) 16%, var(--sw-surface));
+  box-shadow: inset 0 0 0 var(--sw-border-width) color-mix(in srgb, var(--sw-accent) 20%, transparent);
+}
+
+.operator-workflow-step-help {
+  display: none;
+}
+
+.operator-workflow-coach-actions {
+  display: none;
+}
+
+.operator-studio-frame {
+  padding-top: var(--sw-space-4);
+  padding-bottom: 0;
+  overflow-y: scroll;
+  scrollbar-gutter: stable both-edges;
+}
+
+.operator-studio-frame-inner {
+  width: min(100%, 1080px);
+  display: grid;
+  min-height: 0;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: auto auto;
+  gap: var(--sw-space-2);
+}
+
+.operator-studio-frame-inner > * {
+  grid-column: 1 / -1;
+}
+
+.operator-studio-frame-inner > .operator-studio-action-bar {
+  margin-top: calc(-1 * var(--sw-space-4)) !important;
+}
+
+.operator-studio-step-body {
+  display: grid;
+  gap: var(--sw-space-4);
+  grid-row: 1;
+}
+
+.operator-studio-frame-inner[data-width="wide"] {
+  width: min(100%, 1080px);
+}
+
+.operator-studio-header {
+  display: grid;
+  gap: var(--sw-space-1);
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.operator-studio-step-label {
+  width: fit-content;
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-accent) 18%, var(--sw-line));
+  border-radius: var(--sw-radius-pill);
+  background: color-mix(in srgb, var(--sw-accent) 10%, var(--sw-surface));
+  color: var(--sw-accent-strong);
+  padding: calc(5px * var(--sw-ui-scale)) calc(10px * var(--sw-ui-scale));
+  font-size: clamp(11px, calc(11.5px * var(--sw-ui-scale)), 14px);
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.operator-studio-title {
+  color: var(--sw-text);
+  font-family: var(--sw-font-display);
+  font-size: clamp(22px, calc(25px * var(--sw-ui-scale)), 31px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+}
+
+.operator-studio-description {
+  max-width: 62ch;
+  color: var(--sw-text-muted);
+  font-size: var(--sw-font-size-ui);
+  line-height: 1.42;
+}
+
+.operator-studio-content {
+  display: grid;
+  align-content: start;
+  gap: var(--sw-space-4);
+  padding-bottom: 0;
+}
+
+.operator-studio-action-bar {
+  position: relative;
+  z-index: 30;
+  grid-row: auto;
+  margin-top: calc(-1 * var(--sw-space-4));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sw-space-4);
+  min-height: calc(64px * var(--sw-ui-scale));
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 82%, transparent);
+  border-radius: calc(var(--sw-radius-card) * 1.15);
+  background: color-mix(in srgb, var(--sw-surface) 92%, transparent);
+  box-shadow: var(--sw-shadow-level-3), inset 0 1px 0 color-mix(in srgb, var(--sw-text) 5%, transparent);
+  padding: var(--sw-space-3) var(--sw-space-4);
+  backdrop-filter: blur(12px);
+  animation: operatorActionSnackIn 220ms var(--sw-motion-ease) both;
+}
+
+.operator-studio-action-helper {
+  display: grid;
+  gap: calc(var(--sw-space-1) / 2);
+  min-width: 0;
+  max-width: 68ch;
+  color: var(--sw-text-muted);
+  font-size: var(--sw-font-size-small);
+  line-height: 1.35;
+}
+
+.operator-studio-action-title {
+  color: var(--sw-text);
+  font-size: var(--sw-font-size-label);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.operator-studio-action-copy {
+  display: block;
+}
+
+.operator-studio-action-buttons {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sw-space-2);
+}
+
+.operator-studio-action-buttons .operator-button,
+.operator-studio-action-buttons .operator-button-primary {
+  min-width: calc(150px * var(--sw-ui-scale));
+  min-height: calc(42px * var(--sw-ui-scale));
+}
+
+@keyframes operatorActionSnackIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.operator-numbered-section,
+.operator-test-goal-section,
+.operator-project-card,
+.operator-access-card {
+  border-radius: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding: var(--sw-space-3) 0;
+}
+
+.operator-access-summary-card {
+  border-color: color-mix(in srgb, var(--sw-success) 16%, transparent) !important;
+  border-radius: calc(var(--sw-radius-card) * 1.15) !important;
+  background:
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--sw-success) 10%, transparent), transparent 34%),
+    color-mix(in srgb, var(--sw-field) 58%, var(--sw-surface)) !important;
+  box-shadow: var(--sw-shadow-level-2);
+  padding: var(--sw-space-4) !important;
+}
+
+.operator-numbered-section + .operator-numbered-section,
+.operator-access-card + .operator-access-card {
+  border-top: 0;
+}
+
+.operator-test-goal-empty,
+.operator-access-login-row,
+.operator-access-login-controls,
+.operator-access-preferences-card,
+.operator-readiness-row {
+  border-radius: calc(var(--sw-radius-control) * 1.35);
+  background: color-mix(in srgb, var(--sw-field) 55%, transparent);
+  box-shadow: var(--sw-shadow-level-1);
+}
+
+.operator-access-summary-card .operator-readiness-list-redesign {
+  gap: var(--sw-space-2);
+  margin-top: var(--sw-space-2);
+}
+
+.operator-access-summary-card .operator-readiness-row {
+  align-items: center;
+  min-height: calc(64px * var(--sw-ui-scale));
+  border-color: color-mix(in srgb, var(--sw-success) 18%, transparent) !important;
+  background: color-mix(in srgb, var(--sw-surface) 76%, transparent) !important;
+  padding: var(--sw-space-3);
+}
+
+.operator-access-summary-card .operator-readiness-row svg {
+  flex-shrink: 0;
+  width: calc(18px * var(--sw-ui-scale));
+  height: calc(18px * var(--sw-ui-scale));
+}
+
+.operator-recent-projects-panel {
+  padding-top: var(--sw-space-4);
+}
+
+.operator-recent-projects-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--sw-space-2);
+}
+
+.operator-recent-project-button {
+  width: 100%;
+  min-height: calc(54px * var(--sw-ui-scale));
+  border: var(--sw-border-width) solid var(--sw-line);
+  border-radius: var(--sw-radius-control);
+  background: color-mix(in srgb, var(--sw-field) 58%, transparent);
+  padding: var(--sw-space-2) var(--sw-space-3);
+  text-align: left;
+  transition: border-color var(--sw-motion) var(--sw-motion-ease), background var(--sw-motion) var(--sw-motion-ease);
+}
+
+.operator-recent-project-button:hover {
+  border-color: color-mix(in srgb, var(--sw-accent) 42%, var(--sw-line));
+  background: color-mix(in srgb, var(--sw-accent) 5%, var(--sw-field));
+}
+
+.operator-access-login-group {
+  margin-top: var(--sw-space-3);
+  border: var(--sw-border-width) solid var(--sw-line);
+  border-radius: var(--sw-radius-control);
+  background: color-mix(in srgb, var(--sw-field) 42%, transparent);
+  overflow: hidden;
+}
+
+.operator-access-login-group .operator-access-login-row {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.operator-access-login-group .operator-access-login-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, auto);
+  align-items: end;
+  gap: var(--sw-space-3);
+  margin-top: 0;
+  border: 0;
+  border-top: var(--sw-border-width) solid var(--sw-line);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--sw-surface) 42%, transparent);
+  padding: var(--sw-space-3);
+}
+
+.operator-access-login-group .operator-access-login-controls .operator-button,
+.operator-access-login-group .operator-access-login-controls .operator-button-primary {
+  width: 100%;
+  min-height: calc(40px * var(--sw-ui-scale));
+  justify-content: center;
+}
+
+@media (max-width: 760px) {
+  .operator-access-login-group .operator-access-login-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .operator-studio-action-bar {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .operator-studio-action-buttons {
+    justify-content: stretch;
+  }
+
+  .operator-studio-action-buttons > * {
+    flex: 1 1 auto;
+  }
+}

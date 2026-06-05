@@ -1,13 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { animate } from "motion";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Toaster } from "sonner";
 import ThreePanelLayout from "./components/Layout/ThreePanelLayout";
-import ConfigPanel from "./components/LeftPanel/ConfigPanel";
 import CenterPanel from "./components/CenterPanel/CenterPanel";
-import RightPanel from "./components/RightPanel/RightPanel";
-import { useConfigStore } from "./store/config.store";
+import { DevFeedbackOverlay } from "./devtools/DevFeedbackOverlay";
+import { useLanguageStore, useTranslations } from "./i18n/localeStore";
+import { WorkflowShell } from "./workflow/WorkflowShell";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,6 +18,14 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+const UI_SCALE_STORAGE_KEY = "specwright.uiScale.v2";
+const DEFAULT_UI_SCALE = 1;
+const BASE_MAGNIFICATION = 1.25;
+
+function clampUiScale(value: number): number {
+  return Math.min(1.28, Math.max(0.8, value));
+}
 
 class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null; copied: boolean }> {
   state: { error: string | null; copied: boolean } = { error: null, copied: false };
@@ -32,7 +39,9 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   }
 
   render(): React.ReactNode {
-    if (!this.state.error) return this.props.children;
+    if (!this.state.error) {
+      return this.props.children;
+    }
     const error = this.state.error;
     return (
       <div className="specwright-intro specwright-intro-static">
@@ -65,95 +74,74 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
 }
 
 export default function App(): React.JSX.Element {
-  const projectState = useConfigStore((s) => s.projectState);
+  const language = useLanguageStore((state) => state.language);
+  const setLanguage = useLanguageStore((state) => state.setLanguage);
+  const text = useTranslations();
   const [uiScale, setUiScale] = useState(1);
-  const [theme, setTheme] = useState("slate");
-  const [motion, setMotion] = useState("operator");
   const [appVersion, setAppVersion] = useState("");
-  const [showIntro, setShowIntro] = useState(true);
-  const [introExiting, setIntroExiting] = useState(false);
-  const introBarRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    const barDelay = 220;
-    const barDuration = 1100;
-    let controls: ReturnType<typeof animate> | null = null;
-    const barTimer = window.setTimeout(() => {
-      if (!introBarRef.current) return;
-      controls = animate(
-        introBarRef.current,
-        { transform: ["scaleX(0)", "scaleX(1)"] },
-        { duration: barDuration / 1000, ease: [0.28, 0.08, 0.12, 1] }
-      );
-    }, barDelay);
-    const timer = window.setTimeout(() => {
-      requestAnimationFrame(() => document.body.classList.add("app-ready"));
-      setIntroExiting(true);
-    }, barDelay + barDuration);
-    const removeTimer = window.setTimeout(() => setShowIntro(false), barDelay + barDuration + 420);
-    return () => {
-      window.clearTimeout(barTimer);
-      controls?.stop();
-      window.clearTimeout(timer);
-      window.clearTimeout(removeTimer);
-      document.body.classList.remove("app-ready");
-    };
+  const applyScale = useCallback((value: number): void => {
+    const next = clampUiScale(value);
+    document.documentElement.style.setProperty("--sw-ui-scale", String(next * BASE_MAGNIFICATION));
+    window.localStorage.setItem(UI_SCALE_STORAGE_KEY, String(next));
+    setUiScale(next);
   }, []);
-
   useEffect(() => {
     window.specwright.app.getVersion().then(setAppVersion).catch(() => setAppVersion(""));
   }, []);
 
   useEffect(() => {
-    const storageKey = "specwright.theme";
-    const saved = window.localStorage.getItem(storageKey) || "sand";
-    document.documentElement.dataset.theme = saved;
-    setTheme(saved);
+    document.documentElement.dataset.theme = "paper";
+    document.documentElement.dataset.motion = "calm";
+    window.localStorage.setItem("specwright.theme", "paper");
   }, []);
 
   useEffect(() => {
-    const storageKey = "specwright.motion";
-    const saved = window.localStorage.getItem(storageKey) || "operator";
-    document.documentElement.dataset.motion = saved;
-    setMotion(saved);
-  }, []);
-
-  const setAppTheme = (nextTheme: string): void => {
-    document.documentElement.dataset.theme = nextTheme;
-    window.localStorage.setItem("specwright.theme", nextTheme);
-    setTheme(nextTheme);
-  };
-
-  const setAppMotion = (nextMotion: string): void => {
-    document.documentElement.dataset.motion = nextMotion;
-    window.localStorage.setItem("specwright.motion", nextMotion);
-    setMotion(nextMotion);
-  };
-
-  useEffect(() => {
-    const storageKey = "specwright.uiScale";
-    const clamp = (value: number): number => Math.min(1.35, Math.max(0.9, value));
-    const applyScale = (value: number): void => {
-      const next = clamp(value);
-      document.documentElement.style.setProperty("--sw-ui-scale", String(next));
-      window.localStorage.setItem(storageKey, String(next));
-      setUiScale(next);
-    };
-
-    const saved = Number(window.localStorage.getItem(storageKey));
-    if (Number.isFinite(saved) && saved > 0) applyScale(saved);
+    const saved = Number(window.localStorage.getItem(UI_SCALE_STORAGE_KEY));
+    if (Number.isFinite(saved) && saved > 0) {
+      applyScale(saved);
+    } else {
+      applyScale(DEFAULT_UI_SCALE);
+    }
 
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (!["+", "=", "-", "_", "0"].includes(event.key)) return;
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+
+      if (!["+", "=", "-", "_", "0"].includes(event.key)) {
+        return;
+      }
 
       event.preventDefault();
       const current = Number.parseFloat(
         getComputedStyle(document.documentElement).getPropertyValue("--sw-ui-scale") || "1"
       );
-      if (event.key === "0") applyScale(1);
-      else if (event.key === "+" || event.key === "=") applyScale((Number.isFinite(current) ? current : 1) + 0.05);
-      else applyScale((Number.isFinite(current) ? current : 1) - 0.05);
+      const currentScale = Number.isFinite(current) ? current / BASE_MAGNIFICATION : 1;
+      if (event.key === "0") {
+        applyScale(DEFAULT_UI_SCALE);
+        return;
+      }
+
+      if (event.key === "+" || event.key === "=") {
+        applyScale(currentScale + 0.05);
+        return;
+      }
+
+      applyScale(currentScale - 0.05);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [applyScale]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "-") return;
+      if (isEditableTarget(event.target)) return;
+
+      event.preventDefault();
+      void window.specwright.window.minimize();
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -166,47 +154,43 @@ export default function App(): React.JSX.Element {
         <Tooltip.Provider delayDuration={450}>
           <ThreePanelLayout
             scalePercent={Math.round(uiScale * 100)}
-            theme={theme}
-            onThemeChange={setAppTheme}
-            motion={motion}
-            onMotionChange={setAppMotion}
+            onScalePercentChange={(percent) => applyScale(percent / 100)}
+            onScaleReset={() => applyScale(DEFAULT_UI_SCALE)}
+            theme="paper"
+            language={language}
+            onLanguageChange={setLanguage}
+            languageLabel={text.app.languageLabel}
+            productLabel={text.app.product}
+            labels={{
+              scale: text.app.uiScaleLabel,
+              theme: text.app.themeLabel,
+              uiScaleHelp: text.app.uiScaleHelp,
+              showSetup: text.app.showSetup,
+              hideSetup: text.app.hideSetup,
+              showPanel: text.app.showPanel,
+              hidePanel: text.app.hidePanel,
+              minimize: text.app.minimize,
+              toggleFullscreen: text.app.toggleFullscreen,
+              close: text.app.close,
+              themes: text.app.themes,
+            }}
             appVersion={appVersion}
-            left={<ConfigPanel />}
-            center={<CenterPanel />}
-            right={projectState === "ready" ? <RightPanel /> : undefined}
+            center={(
+              <WorkflowShell>
+                <CenterPanel headless />
+              </WorkflowShell>
+            )}
           />
-          {showIntro && (
-            <div className="specwright-intro" data-exiting={introExiting}>
-              <div className="specwright-intro-card">
-                <div className="specwright-intro-brand">
-                  <div className="specwright-intro-mark">S</div>
-                  <p className="specwright-intro-kicker">Specwright</p>
-                  <h1 className="specwright-intro-title">Preparing the workbench</h1>
-                </div>
-                <div className="specwright-intro-status" aria-label="Loading Specwright workspace">
-                  <div className="specwright-intro-status-row">
-                    <span>01</span>
-                    <span>Project state</span>
-                  </div>
-                  <div className="specwright-intro-status-row">
-                    <span>02</span>
-                    <span>Motion system</span>
-                  </div>
-                  <div className="specwright-intro-status-row">
-                    <span>03</span>
-                    <span>Workbench panels</span>
-                  </div>
-                  <div className="specwright-intro-bar" aria-hidden="true">
-                    <span ref={introBarRef} />
-                  </div>
-                  <p className="specwright-intro-note">Loading interface modules and restoring your workspace.</p>
-                </div>
-              </div>
-            </div>
-          )}
+          <DevFeedbackOverlay />
           <Toaster richColors={false} position="bottom-right" />
         </Tooltip.Provider>
       </QueryClientProvider>
     </AppErrorBoundary>
   );
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : null;
+  if (!element) return false;
+  return Boolean(element.closest("input, textarea, select, [contenteditable='true']"));
 }

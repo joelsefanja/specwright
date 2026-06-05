@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import { useTranslations } from "@renderer/i18n/localeStore";
+import { Key } from "@phosphor-icons/react";
+import { ModalShell } from "../ui";
 
 export interface AuthFields {
   userEmail: string;
@@ -36,43 +39,72 @@ export function AuthSettingsModal({
   onSave: (fields: AuthFields) => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const text = useTranslations().configureAccess.authModal;
   const [fields, setFields] = useState<AuthFields>(initial);
+  const [submitted, setSubmitted] = useState(false);
+  const [touched, setTouched] = useState<Set<keyof AuthFields>>(new Set());
   const set = (k: keyof AuthFields) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setFields((p) => ({ ...p, [k]: e.target.value }));
+  const touch = (k: keyof AuthFields) => () =>
+    setTouched((current) => new Set(current).add(k));
 
   const isOAuth = strategy === "oauth";
   const canSave = isOAuth ? isOAuthConfigured(fields) : isEmailPasswordConfigured(fields);
 
-  const inputCls = (required: boolean, val: string) =>
-    `operator-field w-full px-2 py-2 ${required && !val ? "border-[var(--sw-danger)]" : ""}`;
+  const inputCls = (required: boolean, val: string, key: keyof AuthFields) =>
+    `operator-field w-full px-2 py-2 ${required && !val && (submitted || touched.has(key)) ? "border-[var(--sw-danger)]" : ""}`;
+
+  const footer = (
+    <>
+      <button type="button" onClick={onClose} className="operator-button">
+        {text.cancel}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setSubmitted(true);
+          if (canSave) onSave(fields);
+        }}
+        disabled={!canSave}
+        className="operator-button-primary disabled:opacity-40"
+      >
+        {text.save}
+      </button>
+    </>
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="operator-panel operator-modal-sm border shadow-2xl max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-operator-line">
-          <h2 className="text-stone-200 text-sm font-semibold">
-            {isOAuth ? "OAuth" : "Email + Password"} Settings
-          </h2>
-          <button onClick={onClose} className="operator-muted hover:text-stone-300 text-xs">Close</button>
-        </div>
+    <ModalShell
+      title={text.modalTitle}
+      description={text.intro}
+      icon={<Key size={18} weight="duotone" />}
+      size="md"
+      closeLabel={text.close}
+      footer={footer}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+    >
+          <div className="operator-auth-context-card">
+            <div>
+              <p className="operator-auth-context-label">{text.userIdentity}</p>
+              <strong>{fields.userEmail || text.notFilledIn}</strong>
+            </div>
+            <p>{text.requiredHelp}</p>
+          </div>
 
-        <div className="px-4 py-3 space-y-4">
           <div className="space-y-2">
-            <p className="operator-section-title">User Identity</p>
+            <p className="operator-section-title">{text.userIdentity}</p>
 
             <div>
               <label className="operator-control-label">
-                Email <span className="operator-danger">*</span>
+                {text.email} <span className="operator-danger">*</span>
               </label>
               <input
-                type="text"
+                type="email"
                 value={fields.userEmail}
                 onChange={set("userEmail")}
+                onBlur={touch("userEmail")}
                 placeholder="user@example.com"
-                className={inputCls(true, fields.userEmail)}
+                className={inputCls(true, fields.userEmail, "userEmail")}
               />
             </div>
 
@@ -80,27 +112,29 @@ export function AuthSettingsModal({
               <>
                 <div>
                   <label className="operator-control-label">
-                    Display Name <span className="operator-muted">(optional)</span>
+                    {text.displayName} <span className="operator-muted">({text.optional})</span>
                   </label>
                   <input
                     type="text"
                     value={fields.userName}
                     onChange={set("userName")}
-                    placeholder="Derived from email if blank"
-                    className={inputCls(false, fields.userName)}
+                    onBlur={touch("userName")}
+                    placeholder={text.displayNamePlaceholder}
+                    className={inputCls(false, fields.userName, "userName")}
                   />
                 </div>
 
                 <div>
                   <label className="operator-control-label">
-                    Picture URL <span className="operator-muted">(optional)</span>
+                    {text.pictureUrl} <span className="operator-muted">({text.optional})</span>
                   </label>
                   <input
                     type="text"
                     value={fields.userPicture}
                     onChange={set("userPicture")}
-                    placeholder="SVG initials auto-generated if blank"
-                    className={inputCls(false, fields.userPicture)}
+                    onBlur={touch("userPicture")}
+                    placeholder={text.picturePlaceholder}
+                    className={inputCls(false, fields.userPicture, "userPicture")}
                   />
                 </div>
               </>
@@ -109,14 +143,15 @@ export function AuthSettingsModal({
             {!isOAuth && (
               <div>
                 <label className="operator-control-label">
-                  Password <span className="operator-danger">*</span>
+                  {text.password} <span className="operator-danger">*</span>
                 </label>
                 <input
                   type="password"
                   value={fields.password}
                   onChange={set("password")}
+                  onBlur={touch("password")}
                   placeholder="••••••••"
-                  className={inputCls(true, fields.password)}
+                  className={inputCls(true, fields.password, "password")}
                 />
               </div>
             )}
@@ -125,97 +160,83 @@ export function AuthSettingsModal({
           {isOAuth && (
             <div className="space-y-2">
               <p className="operator-section-title">
-                Auth Mechanism <span className="operator-muted normal-case tracking-normal">(one required)</span>
+                {text.authMechanism} <span className="operator-muted normal-case tracking-normal">({text.oneRequired})</span>
               </p>
 
               <div>
                 <label className="operator-control-label">
-                  Storage Key
+                  {text.storageKey}
                   {!fields.buttonTestId && <span className="operator-danger"> *</span>}
                 </label>
                 <input
                   type="text"
                   value={fields.storageKey}
                   onChange={set("storageKey")}
-                  placeholder="localStorage key (e.g. app-auth-user)"
-                  className={inputCls(!fields.buttonTestId, fields.storageKey)}
+                  onBlur={touch("storageKey")}
+                  placeholder={text.storagePlaceholder}
+                  className={inputCls(!fields.buttonTestId, fields.storageKey, "storageKey")}
                 />
-                <p className="operator-muted text-xs mt-1">Inject auth directly — no popup needed</p>
+                <p className="operator-muted text-xs mt-1">{text.storageHelp}</p>
               </div>
 
               <div className="flex items-center gap-2">
                 <hr className="flex-1 border-operator-line" />
-                <span className="operator-muted text-xs">or</span>
+                <span className="operator-muted text-xs">{text.or}</span>
                 <hr className="flex-1 border-operator-line" />
               </div>
 
               <div>
                 <label className="operator-control-label">
-                  Sign-in Button Test ID
+                  {text.buttonTestId}
                   {!fields.storageKey && <span className="operator-danger"> *</span>}
                 </label>
                 <input
                   type="text"
                   value={fields.buttonTestId}
                   onChange={set("buttonTestId")}
+                  onBlur={touch("buttonTestId")}
                   placeholder="google-signin-button"
-                  className={inputCls(!fields.storageKey, fields.buttonTestId)}
+                  className={inputCls(!fields.storageKey, fields.buttonTestId, "buttonTestId")}
                 />
               </div>
 
               <div>
                 <label className="operator-control-label">
-                  Sign-in Path <span className="operator-muted">(optional)</span>
+                  {text.signInPath} <span className="operator-muted">({text.optional})</span>
                 </label>
                 <input
                   type="text"
                   value={fields.signinPath}
                   onChange={set("signinPath")}
+                  onBlur={touch("signinPath")}
                   placeholder="/signin"
-                  className={inputCls(false, fields.signinPath)}
+                  className={inputCls(false, fields.signinPath, "signinPath")}
                 />
               </div>
 
               <div>
                 <label className="operator-control-label">
-                  Post-login URL <span className="operator-muted">(optional)</span>
+                  {text.postLoginUrl} <span className="operator-muted">({text.optional})</span>
                 </label>
                 <input
                   type="text"
                   value={fields.postLoginUrl}
                   onChange={set("postLoginUrl")}
+                  onBlur={touch("postLoginUrl")}
                   placeholder="**/"
-                  className={inputCls(false, fields.postLoginUrl)}
+                  className={inputCls(false, fields.postLoginUrl, "postLoginUrl")}
                 />
               </div>
             </div>
           )}
 
-          {!canSave && (
+          {submitted && !canSave && (
             <p className="operator-danger text-xs">
               {isOAuth
-                ? "Email and at least one auth mechanism (Storage Key or Button Test ID) are required."
-                : "Email and password are required."}
+                ? text.oauthRequired
+                : text.passwordRequired}
             </p>
           )}
-        </div>
-
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-operator-line">
-          <button
-            onClick={onClose}
-            className="operator-button"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => canSave && onSave(fields)}
-            disabled={!canSave}
-            className="operator-button-primary disabled:opacity-40"
-          >
-            Save Settings
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
