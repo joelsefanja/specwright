@@ -1,5 +1,5 @@
 import { ipcMain, app } from "electron";
-import { spawn, type ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import type { IPty } from "node-pty";
 import type { OpenCodeService } from "../services/OpenCodeService";
 
