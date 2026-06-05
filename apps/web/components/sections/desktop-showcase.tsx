@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { cn } from "../ui/cn";
+import { Pill } from "../ui/pill";
 
 export type DesktopSlide = {
   id: string;
@@ -108,9 +109,9 @@ export function DesktopShowcaseSection({ slides = DEFAULT_SLIDES }: { slides?: D
               <span className="text-xs text-slate-400 font-medium">Specwright Desktop</span>
             </div>
             {current.badge && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              <Pill className="bg-purple-500/20 text-purple-300">
                 {current.badge}
-              </span>
+              </Pill>
             )}
           </div>
 

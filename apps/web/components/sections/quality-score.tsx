@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion, useInView } from "framer-motion";
 import { SparklesCore } from "../ui/sparkles";
+import { Pill } from "../ui/pill";
 
 const SCORE_BARS = [
   { label: "Exploration", score: 100 },
@@ -118,10 +119,12 @@ export function QualityScoreSection() {
                 initial={{ opacity: 0, x: -10 }}
                 animate={isInView ? { opacity: 1, x: 0 } : {}}
                 transition={{ delay: 1.8 + i * 0.1 }}
-                className="px-4 py-2 rounded-full bg-slate-800/80 border border-slate-700 text-sm"
+                className="contents"
               >
-                <span className="text-white font-semibold">{stat.value}</span>
-                <span className="text-slate-400 ml-1">{stat.label}</span>
+                <Pill className="bg-slate-800/80 px-4 py-2 text-sm text-slate-400">
+                  <span className="text-white font-semibold">{stat.value}</span>
+                  <span className="ml-1">{stat.label}</span>
+                </Pill>
               </motion.div>
             ))}
           </div>

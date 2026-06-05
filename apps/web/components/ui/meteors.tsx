@@ -19,16 +19,18 @@ export const Meteors = ({
   const [styles, setStyles] = useState<MeteorStyle[]>([]);
 
   useEffect(() => {
-    // Generate random positions only on the client to avoid hydration mismatch
-    const count = number || 20;
-    setStyles(
-      Array.from({ length: count }, () => ({
+    const frame = requestAnimationFrame(() => {
+      // Generate random positions only on the client to avoid hydration mismatch
+      const count = number || 20;
+      setStyles(Array.from({ length: count }, () => ({
         top: 0,
         left: `${Math.floor(Math.random() * (400 - -400) + -400)}px`,
         animationDelay: `${(Math.random() * (0.8 - 0.2) + 0.2).toFixed(2)}s`,
         animationDuration: `${Math.floor(Math.random() * (10 - 2) + 2)}s`,
-      }))
-    );
+      })));
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [number]);
 
   return (

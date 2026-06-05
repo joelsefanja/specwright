@@ -1,5 +1,7 @@
 "use client";
 
+import { Pill } from "../ui/pill";
+
 type DemoVideoProps = {
   src: string;
   poster: string;
@@ -20,9 +22,9 @@ export function DemoVideo({ src, poster, title, description, badge }: DemoVideoP
       />
       <div className="px-4 py-3 flex items-start gap-3">
         {badge && (
-          <span className="mt-0.5 shrink-0 text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/30">
+          <Pill className="mt-0.5 shrink-0 text-[10px] uppercase tracking-widest text-violet-400">
             {badge}
-          </span>
+          </Pill>
         )}
         <div>
           <p className="text-sm font-semibold text-slate-200 mb-0.5">{title}</p>

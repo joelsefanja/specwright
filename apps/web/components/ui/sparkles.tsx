@@ -36,16 +36,20 @@ export const SparklesCore = ({
   const generatedId = useId();
 
   useEffect(() => {
-    const generated: Particle[] = Array.from({ length: particleDensity }, (_, i) => ({
-      id: `particle-${i}`,
-      x: `${Math.random() * 100}%`,
-      y: `${Math.random() * 100}%`,
-      duration: Math.random() * 3 + 1,
-      delay: Math.random() * 2,
-      opacity: Math.random() * 0.5 + 0.3,
-      size: Math.random() * (maxSize - minSize) + minSize,
-    }));
-    setParticles(generated);
+    const frame = requestAnimationFrame(() => {
+      const generated: Particle[] = Array.from({ length: particleDensity }, (_, i) => ({
+        id: `particle-${i}`,
+        x: `${Math.random() * 100}%`,
+        y: `${Math.random() * 100}%`,
+        duration: Math.random() * 3 + 1,
+        delay: Math.random() * 2,
+        opacity: Math.random() * 0.5 + 0.3,
+        size: Math.random() * (maxSize - minSize) + minSize,
+      }));
+      setParticles(generated);
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [particleDensity, minSize, maxSize]);
 
   return (

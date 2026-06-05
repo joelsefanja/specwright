@@ -33,6 +33,21 @@ export function DocsSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  const closeSearch = useCallback(() => {
+    setOpen(false);
+    setQuery("");
+    setResults([]);
+    setLoading(false);
+  }, []);
+
+  const handleQueryChange = (value: string) => {
+    setQuery(value);
+    if (!value.trim()) {
+      setResults([]);
+      setLoading(false);
+    }
+  };
+
   // Load pagefind at runtime — file only exists after `next build && pagefind …`
   const loadPagefind = useCallback(async () => {
     if (window.pagefind) return;
@@ -41,7 +56,6 @@ export function DocsSearch() {
       const resp = await fetch("/pagefind/pagefind.js");
       if (!resp.ok) return; // dev mode — index not built
       const src = await resp.text();
-      // eslint-disable-next-line no-new-func
       const mod = await new Function(`return import('data:text/javascript,' + encodeURIComponent(${JSON.stringify(src)}))`)();
       window.pagefind = mod as PagefindInstance;
     } catch {
@@ -54,39 +68,39 @@ export function DocsSearch() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setOpen((v) => !v);
+        if (open) closeSearch();
+        else setOpen(true);
       }
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeSearch();
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
+  }, [open, closeSearch]);
 
   // Focus input when dialog opens
   useEffect(() => {
     if (open) {
       loadPagefind();
       setTimeout(() => inputRef.current?.focus(), 50);
-    } else {
-      setQuery("");
-      setResults([]);
     }
   }, [open, loadPagefind]);
 
   // Run search
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
       return;
     }
+    let cancelled = false;
     const run = async () => {
       setLoading(true);
       await loadPagefind();
+      if (cancelled) return;
       if (!window.pagefind) {
         setLoading(false);
         return;
       }
-      const raw = await window.pagefind.search(query);
+      const raw = await window.pagefind.search(trimmedQuery);
       const resolved = await Promise.all(
         raw.results.slice(0, 8).map(async (r) => ({
           url: r.url,
@@ -94,23 +108,27 @@ export function DocsSearch() {
           excerpt: await r.excerpt(),
         }))
       );
+      if (cancelled) return;
       setResults(resolved);
       setLoading(false);
     };
     const t = setTimeout(run, 200);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [query, loadPagefind]);
 
   // Click outside to close
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        closeSearch();
       }
     };
     if (open) document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  }, [open, closeSearch]);
 
   return (
     <>
@@ -146,7 +164,7 @@ export function DocsSearch() {
               <input
                 ref={inputRef}
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => handleQueryChange(e.target.value)}
                 placeholder="Search documentation…"
                 className="flex-1 bg-transparent text-white placeholder-slate-500 outline-none text-sm"
               />
@@ -158,7 +176,7 @@ export function DocsSearch() {
               )}
               <kbd
                 className="text-xs text-slate-600 bg-slate-800 rounded px-1.5 py-0.5 font-mono cursor-pointer"
-                onClick={() => setOpen(false)}
+                onClick={closeSearch}
               >
                 Esc
               </kbd>
@@ -169,9 +187,9 @@ export function DocsSearch() {
               <ul className="max-h-80 overflow-y-auto divide-y divide-slate-800">
                 {results.map((r) => (
                   <li key={r.url}>
-                    <Link
-                      href={r.url}
-                      onClick={() => setOpen(false)}
+                      <Link
+                        href={r.url}
+                        onClick={closeSearch}
                       className="flex flex-col gap-1 px-4 py-3 hover:bg-slate-800 transition-colors"
                     >
                       <span className="text-sm font-medium text-slate-200">{r.meta.title}</span>
