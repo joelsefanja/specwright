@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { execSync } from 'child_process';
 import { writeGlobalConfig } from './utils/config.js';
+import { SERVER_INSTRUCTIONS } from './utils/serverInstructions.js';
 
 // ── Auto-fix PATH on macOS when launched from a GUI app (e.g. Claude Desktop) ──
 // GUI apps don't inherit the shell PATH, so tools like node, uvx, npx may not
@@ -65,78 +66,6 @@ const staticTools = [
 // are configured as separate entries in the client project's .mcp.json (CLI/Desktop context)
 // or in the user's claude_desktop_config.json (Claude Desktop context).
 const tools = [...staticTools];
-
-// ── MCP Server ───────────────────────────────────────────────────────────
-// `instructions` is read by Claude Desktop (and other MCP clients that honor it)
-// at connection time. It teaches the client the canonical tool invocation order
-// so it does NOT improvise (e.g. asking the user for credentials before checking
-// instructions.js).
-const SERVER_INSTRUCTIONS = [
-  'Specwright E2E Pipeline — canonical tool flow:',
-  '',
-  'ACTIVATION — invoke these tools whenever the user says any of the following (case-insensitive):',
-  '  "Specwright", "E2E test", "E2E tests", "end-to-end test", "BDD test", "BDD tests",',
-  '  "Playwright BDD", "playwright-bdd", "generate test", "generate tests",',
-  '  "automate test", "run E2E", "write E2E", "create BDD", "e2e automate",',
-  '  "test automation", "generate feature file", "generate scenarios"',
-  'When any of these phrases appear in the user message, call `e2e_automate` immediately.',
-  'Do NOT ask the user any questions first. Do NOT explain the pipeline. Just call the tool.',
-  '',
-  'STEP 0 (one-time, REQUIRED for clients with deferred tool loading like Claude Desktop):',
-  '  Call tool_search with this exact query to preload every specwright tool:',
-  '    select:e2e_automate,e2e_setup,e2e_configure,e2e_process,e2e_explore,e2e_plan,e2e_execute,e2e_generate,e2e_heal,e2e_status,read_file,write_file,edit_file,list_directory',
-  '  Skipping this causes "tool not loaded" errors when later tools are called.',
-  '',
-  '1. ALWAYS call `e2e_automate({})` FIRST. Do NOT ask the user any setup questions before calling it.',
-  '   - If it returns a pipeline plan → proceed to Phase 4 (exploration).',
-  '   - If it returns "NEXT_ACTION: CALL_E2E_SETUP" → call `e2e_setup({})` next.',
-  '2. `e2e_setup({})` collects new config via a native form or fallback questions.',
-  '   - When the fallback fires with a "project path" question, the user answers, then call',
-  '     `e2e_configure({ action: "set_project", projectPath: "<answer>" })` before anything else.',
-  '3. `e2e_configure({ action: "add", config: {...} })` writes the collected config to instructions.js.',
-  '4. Call `e2e_automate({})` again — now it will return the pipeline plan.',
-  '5. For each entry: `e2e_explore` → user approval → `e2e_generate` → optional `e2e_heal`.',
-  '',
-  'FILE MANAGEMENT — use these tools for ALL file reads and writes (Claude Desktop has no native Read/Write tools):',
-  '  read_file(path)              — read any project file (MEMORY.md, .env.testing, seed.spec.js, plan files, etc.)',
-  '  write_file(path, content)    — create or overwrite a file; parent dirs created automatically',
-  '  edit_file(path, old_str, new_str) — replace an exact string in a file (must be unique)',
-  '  list_directory(path)         — list files and subdirectories',
-  'Paths are relative to the project root (or absolute). Access outside the project root is blocked.',
-  '',
-  'USER-VISIBLE OUTPUT (MANDATORY — Claude Desktop hides tool results):',
-  'After EVERY phase tool call, output a brief visible summary as a chat message BEFORE calling the next tool.',
-  'Tool results are collapsed in Claude Desktop — the user sees NOTHING unless you write text.',
-  'Required pattern after each tool:',
-  '  After e2e_automate   → "📋 Phase 1 complete — pipeline loaded (N module(s) to process).\n✅ Phase 2 complete — input source detected: [Instructions / Jira / File].\nCalling Phase 3 (e2e_process) now..."',
-  '  After e2e_process    → "✅ Phase 3 complete — plan written to e2e-tests/plans/. Starting exploration..."',
-  '  After e2e_explore    → "✅ Exploration complete — seed + plan files written. Here is the test plan for your approval:\n[summarise the plan]"',
-  '  After user approval  → "✅ Plan approved. Generating BDD files..."',
-  '  After e2e_generate   → "✅ Phase 7 complete — .feature and steps.js generated. [show file paths]"',
-  '  After e2e_heal       → "✅ Phase 8 complete — [pass/fail count, fixes applied]"',
-  'NEVER silently chain tool calls. Every tool call must be followed by a user-visible message.',
-  '',
-  'Strict rules:',
-  '- NEVER ask the user "what project", "what module", or "what credentials" before calling e2e_automate.',
-  '- NEVER call `e2e_setup` before `e2e_automate` — always check existing state first.',
-  '- NEVER improvise domain-specific or custom setup flows. The tools drive the flow.',
-  '- After user approval in Phase 6, call `e2e_generate` IMMEDIATELY. Do NOT re-explore. Do NOT write `.spec.js` files manually. BDD output goes to `e2e-tests/features/playwright-bdd/{category}/{moduleName}/` as `.feature` + `steps.js`, NEVER to `e2e-tests/playwright/`.',
-  '- If a tool returns an error, RETRY the same tool — do NOT switch to filesystem investigation or improvised workflows.',
-  '- If a browser tool fails with a filesystem error (ENOENT / mkdir / EACCES), the MCP client is missing --output-dir. Report the exact error and STOP — NEVER conclude "the browser is unreachable", NEVER fall back to reading src/ as an exploration substitute.',
-  '',
-  'RUN COMMANDS — NEVER invent or hallucinate test run commands. Always use the exact command from e2e_generate output:',
-  '  @Modules:   npx bddgen && npx playwright test --project setup --project main-e2e --grep "@modulename"',
-  '  @Workflows: npx bddgen && npx playwright test --project setup --project precondition --project workflow-consumers --grep "@modulename"',
-  '  NEVER suggest: npx cucumber-js, jest, vitest, --project chromium, or --project run-workflow',
-  '  npx bddgen MUST always run before npx playwright test — bddgen compiles .feature → .features-gen/*.spec.js',
-  '',
-  'CREDENTIAL PRIVACY (applies to EVERY phase and every response):',
-  '- Values in `.env.testing` (TEST_USER_PASSWORD, TEST_USER_EMAIL, TEST_2FA_CODE, OAUTH_STORAGE_KEY, API tokens) are WRITE-ONLY.',
-  '- You MAY use them inside tool calls (browser_evaluate, browser_type, etc.).',
-  '- You MUST NOT echo, list, quote, or summarise the values in your chat output to the user.',
-  '- You MUST NOT write them into seed/plan/memory files or any committed output.',
-  '- OK: "auth configured ✓", "email: (set)". NOT OK: "email: user@example.com", "password: xyz".',
-].join('\n');
 
 const server = new Server(
   { name: 'specwright', version: '0.7.0' },

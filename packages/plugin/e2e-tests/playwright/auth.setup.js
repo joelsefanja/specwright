@@ -13,6 +13,7 @@
  * See the OAuth strategy vars: OAUTH_STORAGE_KEY, OAUTH_SIGNIN_PATH, etc.
  */
 import { test as setup } from '@playwright/test';
+import * as allure from 'allure-js-commons';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -24,6 +25,14 @@ const authFile = path.join(__dirname, './auth-storage/.auth/user.json');
 const strategy = process.env.AUTH_STRATEGY || 'email-password';
 
 setup('authenticate', async ({ page }) => {
+  await allure.label('test type', 'e2e setup');
+  await allure.parentSuite('E2E');
+  await allure.suite('Setup');
+  await allure.subSuite('Authentication');
+  await allure.epic('E2E');
+  await allure.feature('Authentication');
+  await allure.story('Storage state');
+
   console.log(`[auth] Strategy: ${strategy}`);
 
   if (strategy === 'none') {

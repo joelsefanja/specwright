@@ -35,7 +35,7 @@ pnpm dev
 pnpm test:bdd:auth
 
 # 5. View report
-pnpm report:playwright
+pnpm test:report
 ```
 
 **Never run `npx playwright test` directly** — it skips `bddgen` and uses stale specs.
@@ -121,6 +121,8 @@ pnpm bddgen && npx playwright test --project setup --project main-e2e --grep @ta
 pnpm bddgen && npx playwright test --project setup --project main-e2e -g "Scenario title"
 
 ## Reports
+pnpm test:report            # Generate and open combined Allure report
+pnpm report:allure          # Same as test:report
 pnpm report:playwright       # View HTML report
 pnpm report:bdd              # Generate BDD cucumber HTML report
 pnpm report:bdd:open         # Open BDD report in browser

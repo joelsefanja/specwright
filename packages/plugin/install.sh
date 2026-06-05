@@ -6,6 +6,16 @@
 
 set -e
 
+NODE_BIN="${SPECWRIGHT_NODE_BIN:-node}"
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+  for candidate in "node.exe" "/mnt/c/nvm4w/nodejs/node.exe" "/mnt/c/Program Files/nodejs/node.exe" "/mnt/c/Program Files (x86)/nodejs/node.exe"; do
+    if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET_DIR=""
 SKIP_AUTH=false
@@ -92,6 +102,7 @@ touch "$TARGET_DIR/.specwright/.gitkeep"
 force_copy "$PLUGIN_DIR/install-helpers.sh" "$TARGET_DIR/.specwright/install-helpers.sh"
 mkdir -p "$TARGET_DIR/e2e-tests/playwright/auth-storage/.auth"
 mkdir -p "$TARGET_DIR/e2e-tests/playwright/generated"
+mkdir -p "$TARGET_DIR/e2e-tests/playwright/support"
 mkdir -p "$TARGET_DIR/e2e-tests/playwright/test-data"
 mkdir -p "$TARGET_DIR/e2e-tests/features/playwright-bdd/shared"
 mkdir -p "$TARGET_DIR/e2e-tests/utils"
@@ -106,6 +117,7 @@ cp "$PLUGIN_DIR/e2e-tests/playwright/fixtures.js" "$TARGET_DIR/e2e-tests/playwri
 cp "$PLUGIN_DIR/e2e-tests/playwright/auth.setup.js" "$TARGET_DIR/e2e-tests/playwright/"
 cp "$PLUGIN_DIR/e2e-tests/playwright/global.setup.js" "$TARGET_DIR/e2e-tests/playwright/"
 cp "$PLUGIN_DIR/e2e-tests/playwright/global.teardown.js" "$TARGET_DIR/e2e-tests/playwright/"
+cp "$PLUGIN_DIR/e2e-tests/playwright/support/allure-attach.js" "$TARGET_DIR/e2e-tests/playwright/support/"
 cp "$PLUGIN_DIR/e2e-tests/data/urlConfig.cjs" "$TARGET_DIR/e2e-tests/data/urlConfig.cjs"
 
 # Auth strategy modules
@@ -124,6 +136,16 @@ cp "$PLUGIN_DIR/e2e-tests/scripts/extract-generate-context.js" "$TARGET_DIR/e2e-
 cp "$PLUGIN_DIR/e2e-tests/scripts/merge-coverage.js" "$TARGET_DIR/e2e-tests/scripts/"
 cp "$PLUGIN_DIR/e2e-tests/scripts/coverage-expand.mjs" "$TARGET_DIR/e2e-tests/scripts/"
 cp "$PLUGIN_DIR/e2e-tests/scripts/coverage-istanbul.mjs" "$TARGET_DIR/e2e-tests/scripts/"
+
+# Allure report scripts live at the project root to match npm scripts and backoffice clones.
+mkdir -p "$TARGET_DIR/scripts"
+cp "$PLUGIN_DIR/scripts/open-test-report.js" "$TARGET_DIR/scripts/"
+cp "$PLUGIN_DIR/scripts/normalize-allure-results.js" "$TARGET_DIR/scripts/"
+
+# Optional Vitest support. Safe-copy so existing project-specific Vitest workspaces stay untouched.
+mkdir -p "$TARGET_DIR/vitest"
+safe_copy "$PLUGIN_DIR/vitest/vitest.base.ts" "$TARGET_DIR/vitest/vitest.base.ts"
+safe_copy "$PLUGIN_DIR/vitest/README.md" "$TARGET_DIR/vitest/README.md"
 
 # User-configurable files: only create if missing (never overwrite user's config)
 safe_copy "$PLUGIN_DIR/e2e-tests/data/authenticationData.js" "$TARGET_DIR/e2e-tests/data/authenticationData.js"
@@ -224,11 +246,16 @@ if [ ! -f "$TARGET_DIR/.mcp.json" ]; then
   echo "  ✅ .mcp.json created — Claude Code will discover e2e-automation tools"
 else
   # Merge: add e2e-automation server if not already present
-  node -e "
+  "$NODE_BIN" -e "
     const fs = require('fs');
     const path = require('path');
-    const targetPath = path.join('$TARGET_DIR', '.mcp.json');
-    const templatePath = path.join('$PLUGIN_DIR', 'mcp.json.template');
+    const fromShellPath = (value) => {
+      if (process.platform !== 'win32') return value;
+      const match = value.match(/^\/mnt\/([a-z])\/(.*)$/i);
+      return match ? match[1].toUpperCase() + ':\\\\' + match[2].replace(/\//g, '\\\\') : value;
+    };
+    const targetPath = path.join(fromShellPath('$TARGET_DIR'), '.mcp.json');
+    const templatePath = path.join(fromShellPath('$PLUGIN_DIR'), 'mcp.json.template');
     try {
       const target = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
       const template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
@@ -269,12 +296,17 @@ echo "  ✅ Atlassian MCP — hosted at mcp.atlassian.com (no install required; 
 # ── Step 6: Merge dependencies + scripts into package.json ──
 echo "📦 Step 6: Merging dependencies and scripts into package.json..."
 if [ -f "$TARGET_DIR/package.json" ]; then
-  node -e "
+  "$NODE_BIN" -e "
     const fs = require('fs');
     const path = require('path');
+    const fromShellPath = (value) => {
+      if (process.platform !== 'win32') return value;
+      const match = value.match(/^\/mnt\/([a-z])\/(.*)$/i);
+      return match ? match[1].toUpperCase() + ':\\\\' + match[2].replace(/\//g, '\\\\') : value;
+    };
 
-    const targetPkgPath = path.join('$TARGET_DIR', 'package.json');
-    const snippetPath = path.join('$PLUGIN_DIR', 'package.json.snippet');
+    const targetPkgPath = path.join(fromShellPath('$TARGET_DIR'), 'package.json');
+    const snippetPath = path.join(fromShellPath('$PLUGIN_DIR'), 'package.json.snippet');
     const pm = '$PM';
 
     const pkg = JSON.parse(fs.readFileSync(targetPkgPath, 'utf-8'));

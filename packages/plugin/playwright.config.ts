@@ -95,6 +95,7 @@ export default defineConfig({
   reporter: [
     ['json', { outputFile: fromRoot('reports/json/results.json') }] as const,
     cucumberReporter('json', { outputFile: fromRoot('reports/cucumber-bdd/report.json') }),
+    ['allure-playwright', { resultsDir: fromRoot('test-results/allure/results'), suiteTitle: false }] as const,
     // Console output: "line" on CI, "list" locally
     ...(process.env.CI ? [['line'] as const] : [['list'] as const]),
     // HTML reporter: always locally, on CI only when GENERATE_REPORTS is set

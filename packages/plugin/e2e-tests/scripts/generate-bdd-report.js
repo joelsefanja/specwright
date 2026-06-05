@@ -2,6 +2,9 @@ import report from "multiple-cucumber-html-reporter";
 import fs from "fs";
 import path from "path";
 import { createRequire } from "module";
+import { resolveDataTablePlaceholders } from "./data-table-placeholder-resolver.js";
+import { extractHierarchy, getFeatureDirectorySegments } from "./path-hierarchy.js";
+import { getFeatureStatus, getScenarioCounts, getTreeSummary } from "./report-status-summary.js";
 
 const require = createRequire(import.meta.url);
 
@@ -15,73 +18,6 @@ const getProjectName = () => {
   }
 };
 
-// ─── Hierarchy Extraction ────────────────────────────────────────────────────
-
-/**
- * Extract directory hierarchy from a feature URI.
- *
- * URI pattern: e2e-tests/features/playwright-bdd/{Category}/{Module}/{SubModule}/file.feature
- *
- * Examples:
- *   .../@Modules/@HomePage/homepage.feature
- *     → { Category: "@Modules", Module: "@HomePage" }
- *
- *   .../@Workflows/@FavoritesWorkflow/@0-Precondition/setup.feature
- *     → { Category: "@Workflows", Module: "@FavoritesWorkflow", "Sub-Module": "@0-Precondition" }
- */
-const extractHierarchy = uri => {
-  const marker = "playwright-bdd/";
-  const idx = uri.indexOf(marker);
-  if (idx === -1) return {};
-
-  const relativePath = uri.slice(idx + marker.length);
-  const segments = relativePath.split("/").filter(s => s.length > 0);
-  segments.pop(); // remove filename
-
-  const hierarchy = {};
-  if (segments.length >= 1) hierarchy.Category = segments[0];
-  if (segments.length >= 2) hierarchy.Module = segments[1];
-  if (segments.length >= 3) hierarchy["Sub-Module"] = segments.slice(2).join("/");
-
-  return hierarchy;
-};
-
-/**
- * Get all path segments after playwright-bdd/ (excluding the filename).
- */
-const getFullPath = uri => {
-  const marker = "playwright-bdd/";
-  const idx = uri.indexOf(marker);
-  if (idx === -1) return [];
-  const relativePath = uri.slice(idx + marker.length);
-  const segments = relativePath.split("/").filter(s => s.length > 0);
-  segments.pop(); // remove filename
-  return segments;
-};
-
-// ─── Feature Status Helpers ──────────────────────────────────────────────────
-
-const getFeatureStatus = feature => {
-  if (!feature.elements || feature.elements.length === 0) return "pending";
-  const anyFailed = feature.elements.some(scenario =>
-    scenario.steps?.some(step => step.result && step.result.status === "failed")
-  );
-  if (anyFailed) return "failed";
-  return "passed";
-};
-
-const getScenarioCounts = feature => {
-  if (!feature.elements) return { total: 0, passed: 0, failed: 0 };
-  let passed = 0;
-  let failed = 0;
-  feature.elements.forEach(scenario => {
-    const hasFailed = scenario.steps?.some(s => s.result && s.result.status === "failed");
-    if (hasFailed) failed++;
-    else passed++;
-  });
-  return { total: feature.elements.length, passed, failed };
-};
-
 // ─── Tree Structure ──────────────────────────────────────────────────────────
 
 /**
@@ -91,7 +27,7 @@ const getScenarioCounts = feature => {
 const buildTree = reportData => {
   const root = {};
   reportData.forEach(feature => {
-    const segments = getFullPath(feature.uri || "");
+    const segments = getFeatureDirectorySegments(feature.uri || "");
     let current = root;
     segments.forEach(seg => {
       if (!current[seg]) current[seg] = {};
@@ -130,63 +66,6 @@ const aggregateStats = node => {
     });
 
   return { total, passed, failed };
-};
-
-// ─── DataTable Placeholder Resolution ────────────────────────────────────────
-
-/**
- * Replace DataTable value placeholders (<from_test_data>, <gen_test_data>)
- * with actual resolved values extracted from step attachments.
- *
- * During test execution, processDataTable() in stepHelpers.js attaches resolved
- * values as text/plain embeddings: ✅ Mapped "FieldName" → "key": ActualValue
- *
- * These logs end up on hook steps (Before/After), not on the DataTable step itself.
- * Pass 1: collect ALL resolved values from the entire scenario.
- * Pass 2: replace placeholder cells in DataTable steps.
- */
-const resolveDataTablePlaceholders = reportData => {
-  const placeholders = new Set(["<from_test_data>", "<gen_test_data>"]);
-  const mappedLineRegex = /Mapped "(.+?)"\s*→\s*"(.+?)":\s*(.+)/;
-  const legacyLineRegex = /^(.+?):\s*(<[^>]+>)\s*→\s*(.+)$/;
-  const logMimeTypes = new Set(["text/plain", "text/x.cucumber.log+plain"]);
-  let resolved = 0;
-
-  for (const feature of reportData) {
-    for (const scenario of feature.elements || []) {
-      // Pass 1: collect all resolved values from every step/hook in the scenario
-      const resolvedMap = new Map();
-      for (const step of scenario.steps || []) {
-        for (const emb of step.embeddings || []) {
-          if (!logMimeTypes.has(emb.mime_type) || !emb.data) continue;
-          const text = Buffer.from(emb.data, "base64").toString("utf8");
-          for (const line of text.split("\n")) {
-            const mapped = line.match(mappedLineRegex);
-            if (mapped) { resolvedMap.set(mapped[1].trim(), mapped[3].trim()); continue; }
-            const legacy = line.match(legacyLineRegex);
-            if (legacy) resolvedMap.set(legacy[1].trim(), legacy[3].trim());
-          }
-        }
-      }
-
-      if (resolvedMap.size === 0) continue;
-
-      // Pass 2: replace placeholder cells in DataTable steps
-      for (const step of scenario.steps || []) {
-        const rows = step.arguments?.[0]?.rows;
-        if (!rows) continue;
-        for (const row of rows) {
-          const fieldName = row.cells[0];
-          const cellValue = row.cells[1];
-          if (placeholders.has(cellValue) && resolvedMap.has(fieldName)) {
-            row.cells[1] = resolvedMap.get(fieldName);
-            resolved++;
-          }
-        }
-      }
-    }
-  }
-  if (resolved > 0) console.log(`   Resolved ${resolved} DataTable placeholder(s)`);
 };
 
 // ─── Enrichment ──────────────────────────────────────────────────────────────
@@ -402,16 +281,12 @@ body.darkmode .tv-feature-stats, [data-bs-theme="dark"] .tv-feature-stats { colo
 const generateTreeViewHTML = (reportData, featureLinks = new Map()) => {
   const tree = buildTree(reportData);
   const totalStats = aggregateStats(tree);
-
-  const summaryText = totalStats.failed > 0
-    ? `${totalStats.passed} passed, ${totalStats.failed} failed of ${totalStats.total} scenarios`
-    : `All ${totalStats.total} scenarios passed`;
-  const summaryCls = totalStats.failed > 0 ? "tv-summary tv-summary--has-failures" : "tv-summary";
+  const { summaryText, summaryClass } = getTreeSummary(totalStats);
 
   return `<div class="tv-container">
   <div class="tv-header">
     <h4 class="tv-title">Directory Structure</h4>
-    <span class="${summaryCls}">${summaryText}</span>
+    <span class="${summaryClass}">${summaryText}</span>
   </div>
   <ul class="tv-root">
     ${renderTreeNodes(tree, 0, featureLinks)}

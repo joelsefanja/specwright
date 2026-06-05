@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
@@ -15,6 +15,39 @@ const targetDir = args.find((a, i) => i > initIndex && !a.startsWith('--')) || p
 
 // Check if running in non-interactive mode (desktop app or CI)
 const nonInteractive = flags.includes('--non-interactive') || !process.stdin.isTTY;
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function shellEnvAssignment(key, value) {
+  return value ? `${key}=${shellQuote(value)}` : '';
+}
+
+function toBashPath(filePath) {
+  if (process.platform !== 'win32') return filePath;
+  const normalized = filePath.replace(/\\/g, '/');
+  const drivePath = normalized.match(/^([A-Za-z]):\/(.*)$/);
+
+  try {
+    const uname = execFileSync('bash', ['-lc', 'uname -r'], { encoding: 'utf-8' }).toLowerCase();
+    if (drivePath && uname.includes('microsoft')) {
+      return `/mnt/${drivePath[1].toLowerCase()}/${drivePath[2]}`;
+    }
+  } catch {
+    return normalized;
+  }
+
+  try {
+    const converted = execSync(
+      `bash -lc "if command -v wslpath >/dev/null 2>&1; then wslpath -a ${shellQuote(filePath)}; else printf '%s' ${shellQuote(normalized)}; fi"`,
+      { encoding: 'utf-8' }
+    ).trim();
+    return converted || normalized;
+  } catch {
+    return normalized;
+  }
+}
 
 function ask(question, defaultValue) {
   if (nonInteractive) return Promise.resolve(defaultValue || '');
@@ -42,6 +75,7 @@ async function runInit() {
 
   const installFlags = [...flags.filter(f => f !== '--non-interactive')];
   const installEnv = { ...process.env };
+  installEnv.SPECWRIGHT_NODE_BIN = toBashPath(process.execPath);
 
   // ── Base URL ──
   if (!flags.includes('--base-url') && !nonInteractive) {
@@ -122,7 +156,17 @@ async function runInit() {
     const flagStr = installFlags
       .filter(f => !f.startsWith('--base-url=') && !f.startsWith('--pm='))
       .join(' ');
-    execSync(`bash "${installScript}" "${targetDir}" ${flagStr}`, {
+    const command = [
+      shellEnvAssignment('SPECWRIGHT_NODE_BIN', installEnv.SPECWRIGHT_NODE_BIN),
+      shellEnvAssignment('SPECWRIGHT_BASE_URL', installEnv.SPECWRIGHT_BASE_URL),
+      shellEnvAssignment('SPECWRIGHT_AUTH_STRATEGY', installEnv.SPECWRIGHT_AUTH_STRATEGY),
+      shellEnvAssignment('SPECWRIGHT_PM', installEnv.SPECWRIGHT_PM),
+      'bash',
+      shellQuote(toBashPath(installScript)),
+      shellQuote(toBashPath(path.resolve(targetDir))),
+      flagStr,
+    ].filter(Boolean).join(' ');
+    execFileSync('bash', ['-lc', command], {
       stdio: 'inherit',
       env: installEnv,
     });
@@ -179,9 +223,16 @@ function runUpdate() {
   console.log('  ℹ  User-customized files (authenticationData.js, .env.testing, instructions.js) are preserved.\n');
 
   try {
-    execSync(`bash "${installScript}" "${resolved}" --skip-auth --skip-install`, {
+    const command = [
+      shellEnvAssignment('SPECWRIGHT_NODE_BIN', toBashPath(process.execPath)),
+      'bash',
+      shellQuote(toBashPath(installScript)),
+      shellQuote(toBashPath(resolved)),
+      '--skip-auth --skip-install',
+    ].join(' ');
+    execFileSync('bash', ['-lc', command], {
       stdio: 'inherit',
-      env: { ...process.env },
+      env: { ...process.env, SPECWRIGHT_NODE_BIN: toBashPath(process.execPath) },
     });
     console.log('\n  ✅ Base plugin updated.\n');
   } catch {
