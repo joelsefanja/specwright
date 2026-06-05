@@ -26,6 +26,7 @@ files:
 # playwright-core and playwright are required by @playwright/mcp at runtime.
 asarUnpack:
   - node_modules/@playwright/mcp/**/*
+  - node_modules/node-pty/**/*
   - node_modules/playwright-core/**/*
   - node_modules/playwright/**/*
 
@@ -65,7 +66,7 @@ dmg:
 
 # Windows
 win:
-  icon: build/icon.png
+  icon: build/icon.ico
   target:
     - nsis
     - portable

@@ -19,6 +19,12 @@ function killReportServer(): void {
   }
 }
 
+function hasAllureResults(resultsDir: string): boolean {
+  if (!fs.existsSync(resultsDir)) return false;
+  const stat = fs.statSync(resultsDir);
+  return stat.isDirectory() && fs.readdirSync(resultsDir).some((fileName) => fileName.endsWith('-result.json'));
+}
+
 app.on('before-quit', killReportServer);
 
 export function registerReportIpc(): void {
@@ -26,9 +32,11 @@ export function registerReportIpc(): void {
   ipcMain.handle('report:check-available', (_event, projectPath: string) => {
     const playwrightReport = path.join(projectPath, 'reports', 'playwright', 'index.html');
     const bddJson = path.join(projectPath, 'reports', 'cucumber-bdd', 'report.json');
+    const allureResults = path.join(projectPath, 'test-results', 'allure', 'results');
     return {
       playwright: fs.existsSync(playwrightReport),
       bdd: fs.existsSync(bddJson),
+      allure: hasAllureResults(allureResults),
     };
   });
 
@@ -82,6 +90,23 @@ export function registerReportIpc(): void {
     }
 
     await shell.openPath(htmlReport);
+  });
+
+  ipcMain.handle('report:open-allure', async (_event, projectPath: string) => {
+    killReportServer();
+
+    const scriptPath = path.join(projectPath, 'scripts', 'open-test-report.js');
+    const pm = detectPackageManager(projectPath);
+
+    reportServerProcess = fs.existsSync(scriptPath)
+      ? spawn('node', [scriptPath], { cwd: projectPath, stdio: 'ignore', shell: process.platform === 'win32' })
+      : spawn(pm, ['run', 'test:report'], { cwd: projectPath, stdio: 'ignore', shell: process.platform === 'win32' });
+
+    reportServerProcess.on('exit', () => {
+      reportServerProcess = null;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 1200));
   });
 
   ipcMain.handle('report:start-test-report', async (_event, projectPath: string) => {

@@ -2,9 +2,32 @@ import { ipcMain, BrowserWindow } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { execFile, execFileSync } from "child_process";
+import type { ChildProcess } from "child_process";
 import type { ConfigService } from "../services/ConfigService";
 import type { ProjectService, EnvVars, InstructionCard, PluginSource } from "../services/ProjectService";
 import { log as fileLog } from "../logger";
+import { resolveContainedProjectPath } from "../project/project-path-containment";
+
+// @specwright/agent-runner is loaded lazily so project bootstrap still works when
+// the package has not been built in a development checkout.
+// eslint-disable-next-line @typescript-eslint/no-implied-eval
+const dynamicImport = new Function("specifier", "return import(specifier)") as (
+  specifier: string
+) => Promise<unknown>;
+
+interface RunRegistryModule {
+  createSpecwrightRun: (input: { kind: "specwright-init"; projectPath: string; title?: string; processIds?: number[] }) => { id: string; projectPath: string };
+  updateSpecwrightRun: (projectPath: string, runId: string, patch: Record<string, unknown>) => void;
+  appendSpecwrightRunLog: (projectPath: string, runId: string, line: string) => void;
+}
+
+let _runRegistryModule: RunRegistryModule | null = null;
+async function loadRunRegistry(): Promise<RunRegistryModule> {
+  if (!_runRegistryModule) {
+    _runRegistryModule = await dynamicImport("@specwright/agent-runner") as RunRegistryModule;
+  }
+  return _runRegistryModule;
+}
 
 export function registerProjectIpc(
   configService: ConfigService,
@@ -49,6 +72,11 @@ export function registerProjectIpc(
         resolve(stdout as Buffer);
       });
     });
+  };
+
+  const runGlabApiBuffer = (endpoint: string, cwd: string, hostname?: string): Promise<Buffer> => {
+    const args = hostname ? ["api", "--hostname", hostname, endpoint] : ["api", endpoint];
+    return runGlabBuffer(args, cwd);
   };
 
   const parseRepoFromGitRemote = (remote: string): string | null => {
@@ -120,6 +148,8 @@ export function registerProjectIpc(
       await runGlab(["auth", "status"], cwd);
       return { hasGlab: true, authenticated: true, repo, username: await getGitLabUsername(cwd) };
     } catch (error) {
+      const username = await getGitLabUsername(cwd);
+      if (username) return { hasGlab: true, authenticated: true, repo, username };
       return { hasGlab: true, authenticated: false, repo, error: error instanceof Error ? error.message : String(error) };
     }
   };
@@ -356,17 +386,50 @@ export function registerProjectIpc(
 
     sendLog("[bootstrap] Starting…");
 
+    let runRegistry: RunRegistryModule | null = null;
+    let run: { id: string; projectPath: string } | null = null;
+    const processIds: number[] = [];
+    const registerProcess = (process: ChildProcess): void => {
+      if (!runRegistry || !run || !process.pid || processIds.includes(process.pid)) {
+        return;
+      }
+      processIds.push(process.pid);
+      runRegistry.updateSpecwrightRun(run.projectPath, run.id, { processIds });
+      runRegistry.appendSpecwrightRunLog(run.projectPath, run.id, `[orchestrator] Registered process pid ${process.pid}`);
+    };
+
+    try {
+      runRegistry = await loadRunRegistry();
+      run = runRegistry.createSpecwrightRun({
+        kind: "specwright-init",
+        projectPath: folderPath,
+        title: "Specwright project bootstrap",
+      });
+      runRegistry.updateSpecwrightRun(run.projectPath, run.id, { status: "running" });
+      sendLog(`[orchestrator] Run ${run.id} registered in .specwright/runs/`);
+      sendLog(`[orchestrator] CLI: specwright-agent inspect ${run.id}`);
+    } catch (error) {
+      sendLog(`[orchestrator] WARNING: could not register bootstrap run: ${String(error)}`);
+    }
+
     if (options?.overlay) {
       const overlayLabel = options.overlay.type === "local" ? options.overlay.dirPath : options.overlay.packageName;
       sendLog(`[bootstrap] Overlay: ${overlayLabel}`);
     }
 
-    const result = await projectService.bootstrap(folderPath, options, sendLog);
+    const result = await projectService.bootstrap(folderPath, options, sendLog, registerProcess);
 
     if (result.success) {
       configService.setProjectPath(folderPath);
+      if (run) {
+        runRegistry?.updateSpecwrightRun(run.projectPath, run.id, { status: "done" });
+      }
       sendLog("[bootstrap] Done.");
     } else {
+      if (run) {
+        runRegistry?.appendSpecwrightRunLog(run.projectPath, run.id, `[bootstrap] Error: ${result.error}`);
+        runRegistry?.updateSpecwrightRun(run.projectPath, run.id, { status: "error", error: result.error });
+      }
       sendLog(`[bootstrap] Error: ${result.error}`);
     }
     return result;
@@ -382,14 +445,19 @@ export function registerProjectIpc(
   });
 
   ipcMain.handle("project:read-gitlab-source", async (_event, projectPath: string, relativePath: string) => {
-    const fullPath = path.resolve(projectPath, relativePath);
-    const projectRoot = path.resolve(projectPath);
-    if (!fullPath.startsWith(projectRoot)) throw new Error("File path is outside project");
+    const fullPath = resolveContainedProjectPath(projectPath, relativePath);
+    if (!fs.existsSync(fullPath)) {
+      fileLog(`[gitlab] source missing file=${fullPath}`);
+      return { markdown: "", images: [], missing: true };
+    }
     const markdown = fs.readFileSync(fullPath, "utf-8");
     const issueUrl = markdown.match(/^- URL:\s*(\S+)/m)?.[1];
+    const issueHost = issueUrl ? new URL(issueUrl).hostname : undefined;
     const projectBaseUrl = issueUrl?.replace(/\/-\/(issues|work_items|merge_requests)\/.*$/, "");
     const repoFromIssueUrl = issueUrl ? new URL(issueUrl).pathname.match(/^\/?(.+?)\/-\/(issues|work_items|merge_requests)\//)?.[1] : null;
-    const projectId = repoFromIssueUrl ? await getGitLabProjectId(projectPath, repoFromIssueUrl) : null;
+    const projectId = repoFromIssueUrl
+      ? await getGitLabProjectId(projectPath, repoFromIssueUrl)
+      : await getGitLabProjectId(projectPath, await getGitLabRepoPath(projectPath).catch(() => ""));
     const resolveImageUrl = (src: string): string => {
       if (/^https?:\/\//i.test(src)) return src;
       if (!projectBaseUrl) return src;
@@ -398,7 +466,30 @@ export function registerProjectIpc(
         return `${origin}/-/project/${projectId}${src}`;
       }
       if (src.startsWith("/uploads/")) return `${projectBaseUrl}${src}`;
+      if (src.startsWith("uploads/")) return `${projectBaseUrl}/${src}`;
       return new URL(src, `${projectBaseUrl}/`).toString();
+    };
+    const extractUploadPath = (src: string): string | null => {
+      try {
+        const pathname = /^https?:\/\//i.test(src) ? new URL(src).pathname : src;
+        const uploadMatch = pathname.match(/\/uploads\/(.+)$/) ?? pathname.match(/^uploads\/(.+)$/);
+        return uploadMatch?.[1] ?? null;
+      } catch {
+        const uploadMatch = src.match(/\/uploads\/(.+)$/) ?? src.match(/^uploads\/(.+)$/);
+        return uploadMatch?.[1] ?? null;
+      }
+    };
+    const extractProjectIdFromUploadUrl = (src: string): string | null => {
+      try {
+        const pathname = /^https?:\/\//i.test(src) ? new URL(src).pathname : src;
+        return pathname.match(/\/-\/project\/(\d+)\/uploads\//)?.[1] ?? null;
+      } catch {
+        return src.match(/\/-\/project\/(\d+)\/uploads\//)?.[1] ?? null;
+      }
+    };
+    const isImageSource = (src: string): boolean => {
+      const clean = src.split("?")[0].toLowerCase();
+      return /\.(png|jpe?g|gif|webp|svg)$/.test(clean) || clean.includes("/uploads/") || clean.startsWith("uploads/");
     };
     const mimeFor = (src: string): string => {
       const clean = src.split("?")[0].toLowerCase();
@@ -408,23 +499,43 @@ export function registerProjectIpc(
       if (clean.endsWith(".svg")) return "image/svg+xml";
       return "image/png";
     };
-    const imageSources = Array.from(markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g))
-      .map((match) => match[1]?.trim())
-      .filter(Boolean)
-      .map(resolveImageUrl);
-    const images = await Promise.all(imageSources.map(async (src) => {
+    const imageMatches = [
+      ...Array.from(markdown.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)).map((match) => ({
+        full: match[0],
+        alt: match[1] ?? "",
+        rawSrc: match[2]?.trim() ?? "",
+      })),
+      ...Array.from(markdown.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)).map((match) => ({
+        full: match[0],
+        alt: "",
+        rawSrc: match[1]?.trim() ?? "",
+      })),
+      ...Array.from(markdown.matchAll(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g)).map((match) => ({
+        full: match[0],
+        alt: match[1] ?? "",
+        rawSrc: match[2]?.trim() ?? "",
+      })).filter((match) => isImageSource(match.rawSrc)),
+    ]
+      .filter((match) => Boolean(match.rawSrc));
+    const images = await Promise.all(imageMatches.map(async ({ rawSrc }) => {
+      const src = resolveImageUrl(rawSrc);
       try {
-        if (!projectId) return src;
-        const uploadMatch = new URL(src).pathname.match(/\/uploads\/(.+)$/);
-        if (!uploadMatch) return src;
-        const bytes = await runGlabBuffer(["api", `projects/${projectId}/uploads/${uploadMatch[1]}`], projectPath);
+        const targetProjectId = extractProjectIdFromUploadUrl(src) ?? extractProjectIdFromUploadUrl(rawSrc) ?? projectId;
+        if (!targetProjectId) return src;
+        const uploadPath = extractUploadPath(src) ?? extractUploadPath(rawSrc);
+        if (!uploadPath) return src;
+        const bytes = await runGlabApiBuffer(`projects/${targetProjectId}/uploads/${uploadPath}`, projectPath, issueHost);
         return `data:${mimeFor(src)};base64,${bytes.toString("base64")}`;
       } catch (error) {
         fileLog(`[gitlab] image fetch failed src=${src} error=${error instanceof Error ? error.message : String(error)}`);
         return src;
       }
     }));
-    return { markdown, images };
+    let markdownWithImages = markdown;
+    imageMatches.forEach((match, index) => {
+      markdownWithImages = markdownWithImages.replace(match.full, `![${match.alt}](${images[index] ?? resolveImageUrl(match.rawSrc)})`);
+    });
+    return { markdown: markdownWithImages, images };
   });
 
   ipcMain.handle("project:set-path", (_event, p: string) => {

@@ -1,9 +1,18 @@
-import { ipcMain, BrowserWindow, app } from "electron";
-import { execSync, spawn, type ChildProcess } from "child_process";
+import { ipcMain, BrowserWindow } from "electron";
+import { type ChildProcess } from "child_process";
 import fs from "fs";
-import net from "net";
 import path from "path";
 import { log as fileLog, getLogFilePath, clearLocalLogs } from "../logger";
+import { runChildCommand } from "../pipeline/childProcessRunner";
+import { resolveClaudeExecutablePath } from "../pipeline/claudeExecutableResolver";
+import { readPipelineContextFiles } from "../pipeline/contextFilesReader";
+import { normalizePackageRunArgs, parseDirectRunOptions, withIntegratedBrowserArgs } from "../pipeline/directRunOptions";
+import { collectGeneratedSpecStats, formatGeneratedStats } from "../pipeline/generatedSpecStats";
+import { killProcessTree } from "../pipeline/processTree";
+import { createSpecwrightFileDiff, createSpecwrightFileSnapshot, type SpecwrightFileSnapshot } from "../pipeline/runFileDiff";
+import { ensureLocalApps, readEnvFile, stopManagedLocalApps, type ManagedLocalApp } from "../pipeline/localAppManager";
+import { claudeMcpConfig, commandMcpServers, createDesktopMcpServers } from "../pipeline/mcpConfigFactory";
+import { resolveE2eRunCommand } from "../pipeline/runCommandResolver";
 // claude-runner is ESM-only — must use dynamic import in Electron's CJS main process
 // eslint-disable-next-line @typescript-eslint/no-implied-eval
 const dynamicImport = new Function("specifier", "return import(specifier)") as (
@@ -36,6 +45,13 @@ interface AiSdkRunnerModule {
     abort(): void;
     interrupt(): void;
   };
+  createSpecwrightRun: (input: { kind: "e2e-automate" | "e2e-run" | "cli" | "healer" | "subagent" | "specwright-init"; projectPath: string; title?: string; opencodeBaseUrl?: string; processIds?: number[] }) => { id: string; projectPath: string };
+  getSpecwrightRun: (projectPath: string, runId: string) => { status?: string; permissionHistory?: Array<{ id: string; status: string }> } | null;
+  updateSpecwrightRun: (projectPath: string, runId: string, patch: Record<string, unknown>) => { id: string };
+  appendSpecwrightRunLog: (projectPath: string, runId: string, line: string) => void;
+  writeSpecwrightRunDiff: (projectPath: string, runId: string, diff: string, changedFiles: string[]) => { id: string };
+  addSpecwrightRunPermission: (projectPath: string, runId: string, input: { id: string; toolName: string; toolInput?: Record<string, unknown>; description?: string }) => { id: string };
+  respondSpecwrightRunPermission: (projectPath: string, runId: string, permissionId: string, allowed: boolean, optionId?: string) => Promise<{ id: string }>;
 }
 
 interface AiSdkRunOptions {
@@ -48,8 +64,10 @@ interface AiSdkRunOptions {
   maxSteps?: number;
   onToken: (token: string) => void;
   onLog?: (line: string) => void;
+  onOpenCodeSession?: (info: { sessionId: string; baseUrl: string }) => void;
   onToolEnd?: (toolName: string, durationMs: number) => void;
   onStepFinish?: (info: { stepNumber: number; totalTokens: number; toolCalls: string[] }) => void;
+  projectPath?: string;
 }
 
 let _aiSdkRunnerModule: AiSdkRunnerModule | null = null;
@@ -61,114 +79,7 @@ async function loadAiSdkRunner(): Promise<AiSdkRunnerModule> {
 }
 import type { ConfigService } from "../services/ConfigService";
 import type { ProjectService } from "../services/ProjectService";
-import * as fs from "fs";
-import * as path from "path";
 import { getAtlassianAccessToken } from "./atlassian.ipc";
-
-/**
- * Resolve the system `claude` CLI path for use in a packaged .app.
- *
- * Strategy (in order):
- * 1. Check known install locations directly (fast, no subprocess)
- * 2. Try login shell with `source ~/.zshrc` to pick up nvm/volta/npm paths
- * 3. Try login+interactive shell as last resort
- *
- * Result is cached after the first successful lookup.
- */
-let _nodePath: string | null = null;
-function resolveNodePath(): string {
-  if (_nodePath !== null) return _nodePath;
-  if (!app.isPackaged) { _nodePath = "node"; return _nodePath; }
-
-  const home = require("os").homedir();
-
-  // Check well-known node install locations
-  const candidates = [
-    `/opt/homebrew/bin/node`,                          // Homebrew (Apple Silicon)
-    `/usr/local/bin/node`,                             // Homebrew (Intel) or manual
-    `${home}/.volta/bin/node`,                         // Volta
-    `${home}/.nvm/versions/node/current/bin/node`,    // nvm symlink
-    `/usr/bin/node`,
-  ];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      _nodePath = p;
-      fileLog(`[pipeline] resolveNodePath → ${p} (direct lookup)`);
-      return _nodePath;
-    }
-  }
-
-  // Fall back to login shell which picks up nvm/pyenv shims
-  const shell = fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
-  try {
-    const result = execSync(`${shell} -l -c 'which node'`, {
-      timeout: 5000, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (result && fs.existsSync(result)) {
-      _nodePath = result;
-      fileLog(`[pipeline] resolveNodePath → ${result} (shell lookup)`);
-      return _nodePath;
-    }
-  } catch { /* ignore */ }
-
-  _nodePath = "node"; // last resort — may fail if not in PATH
-  fileLog("[pipeline] resolveNodePath → node (fallback)");
-  return _nodePath;
-}
-
-let _claudePath: string | null = null;
-function resolveClaudePath(): string | null {
-  if (_claudePath !== null) return _claudePath;
-  if (!app.isPackaged) return null; // dev: normal PATH already has claude
-
-  const home = require("os").homedir();
-
-  // 1. Check well-known install locations directly
-  const candidates = [
-    `${home}/.local/bin/claude`,          // npm global (Linux/macOS default)
-    `${home}/.npm-global/bin/claude`,     // npm --prefix ~/.npm-global
-    `/usr/local/bin/claude`,              // Homebrew (Intel Mac) or manual
-    `/opt/homebrew/bin/claude`,           // Homebrew (Apple Silicon)
-    `${home}/.volta/bin/claude`,          // Volta
-    `${home}/.nvm/versions/node/current/bin/claude`, // nvm (approximate)
-  ];
-
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      _claudePath = p;
-      fileLog(`[pipeline] resolveClaudePath → ${p} (direct lookup)`);
-      return _claudePath;
-    }
-  }
-
-  // 2. Login shell + source .zshrc (picks up nvm/volta PATH additions)
-  const shell = fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
-  const rcFile = shell.includes("zsh") ? "~/.zshrc" : "~/.bashrc";
-  for (const cmd of [
-    `source ${rcFile} 2>/dev/null; which claude`,
-    `which claude`,
-  ]) {
-    try {
-      const result = execSync(`${shell} -l -c '${cmd}'`, {
-        timeout: 5000,
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      if (result && fs.existsSync(result)) {
-        _claudePath = result;
-        fileLog(`[pipeline] resolveClaudePath → ${result} (shell lookup)`);
-        return _claudePath;
-      }
-    } catch {
-      // try next
-    }
-  }
-
-  fileLog("[pipeline] resolveClaudePath → not found (claude CLI not on known paths)");
-  _claudePath = "";
-  return null;
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let activeClaudeRunner: any = null;
@@ -176,6 +87,8 @@ let activeClaudeRunner: any = null;
 let activeStream: any = null;
 let activeTestProcess: ChildProcess | null = null;
 let activeManagedAppProcesses: ChildProcess[] = [];
+let activeOpenCodeServerProcess: ChildProcess | null = null;
+let activeSpecwrightRun: { id: string; projectPath: string; processIds: number[]; appendLog: (line: string) => void; update: (patch: Record<string, unknown>) => void; addPermission: (input: { id: string; toolName: string; toolInput?: Record<string, unknown>; description?: string }) => void; respondPermission: (permissionId: string, allowed: boolean) => Promise<void>; registerProcessId: (processId: number) => void } | null = null;
 let activeTestRunPending = false;
 let activeTestRunAborted = false;
 
@@ -194,569 +107,93 @@ function sendDirectRunUpdate(win: BrowserWindow, patch: Record<string, unknown>)
   win.webContents.send("pipeline:direct-run-update", patch);
 }
 
-interface TestRunCommand {
-  command: string;
-  args: string[];
-  label: string;
-  reason: string;
+function opencodeCommand(): string {
+  return process.platform === "win32" ? "opencode.cmd" : "opencode";
 }
 
-interface DirectRunOptions {
-  headed: boolean;
-  integrated: boolean;
-  targetUrl?: string;
-}
-
-interface TestRunContext {
-  projectPath: string;
-  input: string;
-  scripts: Record<string, string>;
-  packageManager: string;
-}
-
-interface TestRunStrategy {
-  matches(context: TestRunContext): boolean;
-  resolve(context: TestRunContext): TestRunCommand;
-}
-
-function parseScriptInvocation(input: string, scripts: Record<string, string>): { scriptName: string; extraArgs: string[] } | null {
-  const [scriptName, ...extraArgs] = input.trim().split(/\s+/);
-  if (!scriptName || !scripts[scriptName]) return null;
-  return { scriptName, extraArgs };
-}
-
-function scriptArgs(scriptName: string, extraArgs: string[]): string[] {
-  return ["run", scriptName, ...(extraArgs.length ? ["--", ...extraArgs] : [])];
-}
-
-const createScriptCommand = (packageManager: string, scriptName: string, extraArgs: string[] = []): TestRunCommand => ({
-  command: packageManager,
-  args: scriptArgs(scriptName, extraArgs),
-  label: extraArgs.length ? `${scriptName} ${extraArgs.join(" ")}` : scriptName,
-  reason: extraArgs.length ? `npm run script with forwarded args` : `npm run script`,
-});
-
-const createPlaywrightCommand = (packageManager: string, args: string[], label: string): TestRunCommand => ({
-  command: packageManager,
-  args: ["exec", "playwright", "test", ...args],
-  label,
-  reason: "direct Playwright command",
-});
-
-function readPackageScripts(projectPath: string): Record<string, string> {
-  const pkgPath = path.join(projectPath, "package.json");
-  return fs.existsSync(pkgPath)
-    ? (JSON.parse(fs.readFileSync(pkgPath, "utf-8")).scripts ?? {}) as Record<string, string>
-    : {};
-}
-
-function detectPackageManager(projectPath: string): string {
-  const extension = process.platform === "win32" ? ".cmd" : "";
-  const lockfiles: Array<[string, string]> = [
-    ["pnpm-lock.yaml", `pnpm${extension}`],
-    ["yarn.lock", `yarn${extension}`],
-    ["package-lock.json", `npm${extension}`],
-  ];
-  return lockfiles.find(([file]) => fs.existsSync(path.join(projectPath, file)))?.[1] ?? `pnpm${extension}`;
-}
-
-function hasRunnableFeatureDir(projectPath: string, bucket: "@Modules" | "@Workflows", tag: string): boolean {
-  const dirName = tag.startsWith("@") ? tag : `@${tag}`;
-  return fs.existsSync(path.join(projectPath, "e2e-tests/features/playwright-bdd", bucket, dirName));
-}
-
-function scriptFor(scripts: Record<string, string>, kind: "all" | "workflows" | "auth"): string | null {
-  const candidates = kind === "all"
-    ? ["test:bdd", "test:e2e"]
-    : kind === "workflows"
-      ? ["test:bdd:workflows", "test:e2e:workflows"]
-      : ["test:bdd:auth", "test:e2e:auth"];
-  return candidates.find((script) => scripts[script]) ?? null;
-}
-
-function readPrimaryFeatureTag(projectPath: string, bucket: "@Modules" | "@Workflows", folderTag: string): string {
-  const dirName = folderTag.startsWith("@") ? folderTag : `@${folderTag}`;
-  const dir = path.join(projectPath, "e2e-tests/features/playwright-bdd", bucket, dirName);
-  if (!fs.existsSync(dir)) return folderTag;
-  const featureFile = fs.readdirSync(dir).find((file) => file.endsWith(".feature"));
-  if (!featureFile) return folderTag;
-  const firstLine = fs.readFileSync(path.join(dir, featureFile), "utf-8").split(/\r?\n/)[0] ?? "";
-  return firstLine.match(/@[\w-]+/g)?.find((tag) => tag.toLowerCase() !== "@workflows" && tag.toLowerCase() !== "@modules") ?? folderTag;
-}
-
-function normalizeKnownFeatureTag(projectPath: string, scriptName: string, tag: string): string {
-  const bucket = scriptName.includes("workflow") ? "@Workflows" : "@Modules";
-  return hasRunnableFeatureDir(projectPath, bucket, tag) ? readPrimaryFeatureTag(projectPath, bucket, tag) : tag;
-}
-
-function normalizeScriptExtraArgs(projectPath: string, scriptName: string, extraArgs: string[]): string[] {
-  const grepIndex = extraArgs.findIndex((arg) => arg === "--grep");
-  if (grepIndex < 0 || !extraArgs[grepIndex + 1]?.startsWith("@")) return extraArgs;
-  const next = [...extraArgs];
-  next[grepIndex + 1] = normalizeKnownFeatureTag(projectPath, scriptName, next[grepIndex + 1]);
-  return next;
-}
-
-const testRunStrategies: TestRunStrategy[] = [
-  {
-    matches: ({ scripts, input }) => Boolean(parseScriptInvocation(input || "test:bdd", scripts)),
-    resolve: ({ projectPath, scripts, input, packageManager }) => {
-      const parsed = parseScriptInvocation(input || "test:bdd", scripts)!;
-      return createScriptCommand(packageManager, parsed.scriptName, normalizeScriptExtraArgs(projectPath, parsed.scriptName, parsed.extraArgs));
-    },
-  },
-  {
-    matches: ({ scripts, input }) => Boolean(scripts[input || "test:bdd"]),
-    resolve: ({ scripts, input, packageManager }) => createScriptCommand(packageManager, scripts[input || "test:bdd"] ? input || "test:bdd" : "test:bdd"),
-  },
-  {
-    matches: ({ input }) => input.startsWith("@"),
-    resolve: ({ projectPath, scripts, input, packageManager }) => {
-      const matchingScript = Object.entries(scripts).find(([name, cmd]) => name.startsWith("test:bdd") && cmd.includes(input))?.[0];
-      if (matchingScript) return createScriptCommand(packageManager, matchingScript);
-
-      const workflowScript = scriptFor(scripts, "workflows");
-      if (hasRunnableFeatureDir(projectPath, "@Workflows", input) && workflowScript) {
-        return createScriptCommand(packageManager, workflowScript, ["--grep", readPrimaryFeatureTag(projectPath, "@Workflows", input)]);
-      }
-      const allScript = scriptFor(scripts, "all");
-      if (hasRunnableFeatureDir(projectPath, "@Modules", input) && allScript) {
-        return createScriptCommand(packageManager, allScript, ["--grep", readPrimaryFeatureTag(projectPath, "@Modules", input)]);
-      }
-
-      const lower = input.toLowerCase();
-      const authScript = scriptFor(scripts, "auth");
-      if (lower.includes("auth") && authScript) return createScriptCommand(packageManager, authScript, ["--grep", input]);
-      if (lower.includes("workflow") && workflowScript) return createScriptCommand(packageManager, workflowScript, ["--grep", input]);
-      return createScriptCommand(packageManager, allScript ?? workflowScript ?? "test:e2e", ["--grep", input]);
-    },
-  },
-  {
-    matches: ({ input }) => input.startsWith("--"),
-    resolve: ({ input, packageManager }) => createPlaywrightCommand(packageManager, input.split(/\s+/), input),
-  },
-  {
-    matches: () => true,
-    resolve: ({ input, packageManager }) => createScriptCommand(packageManager, input || "test:bdd"),
-  },
-];
-
-function resolveE2eRunCommand(projectPath: string, rawArgs: string): TestRunCommand {
-  const context: TestRunContext = {
-    projectPath,
-    input: rawArgs.trim(),
-    scripts: readPackageScripts(projectPath),
-    packageManager: detectPackageManager(projectPath),
-  };
-  return testRunStrategies.find((strategy) => strategy.matches(context))!.resolve(context);
-}
-
-function parseDirectRunOptions(rawArgs: string): { args: string; options: DirectRunOptions } {
-  const parts = rawArgs.trim().split(/\s+/).filter(Boolean);
-  const kept: string[] = [];
-  let headed = false;
-  let integrated = false;
-
-  for (const part of parts) {
-    if (part === "--headed" || part === "--visible-browser") {
-      headed = true;
-      continue;
-    }
-    if (part === "--integrated-browser" || part === "--cdp-browser") {
-      integrated = true;
-      headed = false;
-      continue;
-    }
-    kept.push(part);
+function resolveOpenCodeUrl(rawUrl: unknown): { baseUrl: string; port: number } {
+  const fallback = "http://127.0.0.1:18789";
+  const value = typeof rawUrl === "string" && rawUrl.trim() ? rawUrl.trim() : fallback;
+  try {
+    const parsed = new URL(value);
+    return { baseUrl: parsed.origin, port: parsed.port ? parseInt(parsed.port, 10) : 18789 };
+  } catch {
+    return { baseUrl: fallback, port: 18789 };
   }
-
-  return { args: kept.join(" "), options: { headed, integrated } };
 }
 
-function withIntegratedBrowserArgs(args: string[], options: DirectRunOptions): string[] {
-  if (!options.integrated || args.includes("--workers") || args.some((arg) => arg.startsWith("--workers="))) return args;
-  return [...args, "--workers=1"];
-}
-
-function normalizePackageRunArgs(args: string[]): string[] {
-  if (args[0] !== "run" || args.length <= 2 || args[2] === "--") return args;
-  return [args[0], args[1], "--", ...args.slice(2)];
-}
-
-function describeLikelyWait(commandLine: string): string {
-  if (commandLine.includes("bddgen")) {
-    return "BDD generation can be silent while it scans feature files and writes .features-gen specs.";
+async function isOpenCodeHealthy(baseUrl: string): Promise<boolean> {
+  try {
+    const healthRes = await fetch(`${baseUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+    return healthRes.ok;
+  } catch {
+    return false;
   }
-  if (commandLine.includes("playwright")) {
-    return "Likely stages: webServer startup, auth setup, browser actions, waits, or a dependent local service.";
-  }
-  if (commandLine.includes("test:e2e") || commandLine.includes("test:bdd")) {
-    return "Likely stages: bddgen, Playwright webServer startup, auth setup, then selected tests.";
-  }
-  return "The process is still alive but has not written output.";
 }
 
-function diagnoseOutput(text: string): string | null {
-  if (text.includes("spawn EINVAL")) {
-    return "[diagnostic] Windows could not start the command process. This is a launcher problem, not a Playwright or BDD failure. Specwright should run .cmd tools through the Windows shell; restart the desktop app so the updated runner is used, then rerun.";
-  }
-  if (text.includes("ERR_CONNECTION_REFUSED")) {
-    const target = text.match(/https?:\/\/[^\s,)]+/)?.[0];
-    const url = target ? new URL(target) : null;
-    const serviceHint = url?.port === "4202"
-      ? "Start the narrowcasting frontend repo/app locally on port 4202, then rerun this workflow. This value comes from NARROWCASTING_URL."
-      : "Start the repo/app that owns this URL locally, then rerun the workflow. If the service should not be local, update the matching URL env var.";
-    return `[diagnostic] Connection refused${target ? `: ${target}` : ""}. No service is listening at the URL the test opened. ${serviceHint}`;
-  }
-  if (text.includes("No tests found")) {
-    return "[diagnostic] The package script ran, but Playwright found no tests for this selection. This usually means the script's Playwright projects do not include the chosen feature tag. Add or adjust an npm script in this repo for that workflow, then rerun it from Specwright.";
-  }
-  return null;
-}
+async function startOpenCodeServer(win: BrowserWindow, projectPath: string | undefined, baseUrl: string, port: number): Promise<void> {
+  if (await isOpenCodeHealthy(baseUrl)) return;
 
-interface GeneratedSpecStats {
-  count: number;
-  latestPath: string | null;
-  latestMtimeMs: number;
-}
-
-interface LocalAppRequirement {
-  key: string;
-  url: string;
-  hostname: string;
-  port: number;
-}
-
-interface ManagedLocalApp {
-  requirement: LocalAppRequirement;
-  process: ChildProcess;
-}
-
-function readEnvFile(filePath: string): Record<string, string> {
-  if (!fs.existsSync(filePath)) return {};
-  const values: Record<string, string> = {};
-  for (const line of fs.readFileSync(filePath, "utf-8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx === -1) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const value = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
-    if (key) values[key] = value;
-  }
-  return values;
-}
-
-function localAppRequirements(projectPath: string): LocalAppRequirement[] {
-  const env = readEnvFile(path.join(projectPath, "e2e-tests", ".env.testing"));
-  const seen = new Set<string>();
-  const requirements: LocalAppRequirement[] = [];
-  for (const [key, value] of Object.entries(env)) {
-    if (!key.endsWith("URL") || !value) continue;
-    if (key.startsWith("SPECWRIGHT_")) continue;
-    let url: URL;
-    try { url = new URL(value); } catch { continue; }
-    if (!['localhost', '127.0.0.1'].includes(url.hostname)) continue;
-    const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
-    if (!Number.isFinite(port)) continue;
-    const id = `${url.hostname}:${port}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    requirements.push({ key, url: value, hostname: url.hostname, port });
-  }
-  return requirements;
-}
-
-function isPortOpen(hostname: string, port: number, timeoutMs = 1000): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host: hostname, port });
-    const done = (open: boolean): void => {
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(open);
-    };
-    socket.setTimeout(timeoutMs);
-    socket.once("connect", () => done(true));
-    socket.once("timeout", () => done(false));
-    socket.once("error", () => done(false));
+  win.webContents.send("pipeline:log", { line: `[pipeline] Starting OpenCode server on port ${port}…` });
+  const { spawn } = await import("child_process");
+  activeOpenCodeServerProcess = spawn(opencodeCommand(), ["serve", "--port", String(port)], {
+    stdio: "ignore",
+    shell: false,
+    windowsHide: true,
+    detached: false,
+    cwd: projectPath ?? undefined,
   });
-}
+  let spawnError: string | undefined;
+  activeOpenCodeServerProcess.once("error", (error) => {
+    spawnError = error.message;
+    activeOpenCodeServerProcess = null;
+  });
+  activeOpenCodeServerProcess.once("exit", () => {
+    activeOpenCodeServerProcess = null;
+  });
+  if (activeOpenCodeServerProcess.pid) activeSpecwrightRun?.registerProcessId(activeOpenCodeServerProcess.pid);
 
-function findSiblingProject(projectPath: string, name: string): string | null {
-  const parent = path.dirname(projectPath);
-  const candidate = path.join(parent, name);
-  return fs.existsSync(path.join(candidate, "package.json")) ? candidate : null;
-}
-
-function commandForLocalApp(projectPath: string, requirement: LocalAppRequirement): { cwd: string; command: string; args: string[] } | null {
-  const packageManager = detectPackageManager(projectPath);
-  if (requirement.port === 4200) {
-    return { cwd: projectPath, command: "npx", args: ["ng", "serve", "--host", requirement.hostname, "--port", String(requirement.port)] };
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (spawnError) break;
+    if (await isOpenCodeHealthy(baseUrl)) return;
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  if (requirement.port === 4202 || requirement.key.toLowerCase().includes("narrowcasting")) {
-    const cwd = findSiblingProject(projectPath, "narrowcasting");
-    if (!cwd) return null;
-    return { cwd, command: detectPackageManager(cwd), args: ["run", "dev"] };
-  }
-  return { cwd: projectPath, command: packageManager, args: ["run", "dev"] };
+
+  throw new Error(spawnError ? `OpenCode could not start: ${spawnError}` : "OpenCode server did not become healthy. Install or start OpenCode, then try again.");
 }
 
-async function waitForLocalApp(requirement: LocalAppRequirement, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await isPortOpen(requirement.hostname, requirement.port)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+async function fetchOpenCodeChildSessionIds(baseUrl: string, sessionId: string): Promise<string[]> {
+  const response = await fetch(`${baseUrl}/session/${sessionId}/children`, { signal: AbortSignal.timeout(5000) });
+  if (!response.ok) {
+    throw new Error(`OpenCode children endpoint returned ${response.status}`);
   }
-  return false;
+
+  return extractOpenCodeChildSessionIds(await response.json(), sessionId);
 }
 
-async function ensureLocalApps(win: BrowserWindow, projectPath: string): Promise<ManagedLocalApp[]> {
-  const started: ManagedLocalApp[] = [];
-  for (const requirement of localAppRequirements(projectPath)) {
-    if (await isPortOpen(requirement.hostname, requirement.port)) {
-      sendLog(win, `[runner] Local app already running: ${requirement.key}=${requirement.url}`);
-      sendDirectRunUpdate(win, { browserUrl: requirement.key === "BASE_URL" ? requirement.url : undefined, localApps: "done" });
-      continue;
+function extractOpenCodeChildSessionIds(value: unknown, parentSessionId: string): string[] {
+  const ids = new Set<string>();
+  const visit = (item: unknown): void => {
+    if (typeof item === "string") {
+      if (item !== parentSessionId) ids.add(item);
+      return;
     }
-    const command = commandForLocalApp(projectPath, requirement);
-    if (!command) {
-      throw new Error(`Required local app is not running and no start command is known: ${requirement.key}=${requirement.url}`);
-    }
-    sendLog(win, `[runner] Starting required local app: ${requirement.key}=${requirement.url}`);
-    sendDirectRunUpdate(win, { localApps: "running" });
-    sendLog(win, `[runner] Local app command: ${command.command} ${command.args.join(" ")} (${command.cwd})`);
-    const child = spawn(command.command, command.args, {
-      cwd: command.cwd,
-      shell: process.platform === "win32",
-      env: { ...process.env, NO_UPDATE_NOTIFIER: "1", npm_config_audit: "false", npm_config_fund: "false" },
-    });
-    activeManagedAppProcesses.push(child);
-    started.push({ requirement, process: child });
-    child.stdout?.on("data", (chunk) => {
-      for (const line of chunk.toString().split(/\r?\n/)) {
-        if (shouldShowManagedAppLog(line)) sendLog(win, `[${requirement.key}] ${line.trim()}`);
-      }
-    });
-    child.stderr?.on("data", (chunk) => {
-      for (const line of chunk.toString().split(/\r?\n/)) {
-        if (shouldShowManagedAppLog(line)) sendLog(win, `[${requirement.key}] ${line.trim()}`);
-      }
-    });
-    child.once("exit", (code) => {
-      activeManagedAppProcesses = activeManagedAppProcesses.filter((process) => process !== child);
-      if (code !== null && code !== 0) sendLog(win, `[runner] Local app exited early (${requirement.key}) with code ${code}`);
-    });
-    if (!await waitForLocalApp(requirement, 120_000)) {
-      sendDirectRunUpdate(win, { localApps: "error" });
-      throw new Error(`Required local app did not become reachable: ${requirement.key}=${requirement.url}`);
-    }
-    sendLog(win, `[runner] Local app ready: ${requirement.key}=${requirement.url}`);
-    sendDirectRunUpdate(win, { browserUrl: requirement.key === "BASE_URL" ? requirement.url : undefined, localApps: "done" });
-  }
-  return started;
-}
 
-function stopManagedLocalApps(win: BrowserWindow, apps: ManagedLocalApp[]): void {
-  for (const app of apps) {
-    if (app.process.killed) continue;
-    sendLog(win, `[runner] Stopping managed local app: ${app.requirement.key}=${app.requirement.url}`);
-    app.process.kill();
-    activeManagedAppProcesses = activeManagedAppProcesses.filter((process) => process !== app.process);
-  }
-}
-
-function shouldShowManagedAppLog(line: string): boolean {
-  const clean = line.trim();
-  if (!clean) return false;
-  if (clean.includes("Building...") || clean.includes("Application bundle generation complete")) return true;
-  if (clean.includes("Local:") || clean.includes("ready in") || clean.includes("error") || clean.includes("Error")) return true;
-  if (clean.includes("Watch mode enabled") || clean.includes("Re-optimizing dependencies")) return true;
-  if (/^Initial chunk files|^Lazy chunk files|^chunk-|^styles\.css|^polyfills\.js|^main\.js|^\.\.\.and \d+ more/.test(clean)) return false;
-  if (/^\|?\s*(Names|Raw size|Initial total)/.test(clean)) return false;
-  return false;
-}
-
-function shouldShowTestCommandLog(line: string): boolean {
-  const clean = line.trim();
-  if (!clean) return false;
-  if (/^\[\d+\/\d+\]/.test(clean)) return true;
-  if (/^\s*\d+\s+(passed|failed|skipped|flaky)/.test(clean)) return true;
-  if (clean.startsWith("Running ") || clean.startsWith("Error:") || clean.startsWith("[global.")) return true;
-  if (clean.startsWith("[auth]") || clean.startsWith("[auth:") || clean.startsWith("[fixtures]")) return true;
-  if (clean.startsWith("[runner]") || clean.startsWith("> ")) return true;
-  if (clean.includes("›") && !clean.startsWith("[")) return false;
-  return true;
-}
-
-function collectGeneratedSpecStats(projectPath: string): GeneratedSpecStats {
-  const root = path.join(projectPath, ".features-gen");
-  const stats: GeneratedSpecStats = { count: 0, latestPath: null, latestMtimeMs: 0 };
-  if (!fs.existsSync(root)) return stats;
-
-  const visit = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(fullPath);
-        continue;
-      }
-      if (!entry.name.endsWith(".spec.js")) continue;
-      const fileStats = fs.statSync(fullPath);
-      stats.count += 1;
-      if (fileStats.mtimeMs > stats.latestMtimeMs) {
-        stats.latestMtimeMs = fileStats.mtimeMs;
-        stats.latestPath = path.relative(projectPath, fullPath);
-      }
-    }
+    if (!item || typeof item !== "object") return;
+    const record = item as Record<string, unknown>;
+    const id = record.id ?? record.sessionID ?? record.sessionId;
+    if (typeof id === "string" && id !== parentSessionId) ids.add(id);
+    const children = record.children ?? record.sessions;
+    if (Array.isArray(children)) children.forEach(visit);
   };
 
-  visit(root);
-  return stats;
-}
+  if (Array.isArray(value)) {
+    value.forEach(visit);
+  } else {
+    visit(value);
+  }
 
-function formatGeneratedStats(stats: GeneratedSpecStats): string {
-  if (stats.count === 0) return "0 generated specs";
-  const latest = stats.latestPath ? `, latest ${stats.latestPath}` : "";
-  const changedAt = stats.latestMtimeMs ? ` (${new Date(stats.latestMtimeMs).toLocaleTimeString()})` : "";
-  return `${stats.count} generated specs${latest}${changedAt}`;
-}
-
-function runChildCommand(
-  win: BrowserWindow,
-  projectPath: string,
-  command: string,
-  args: string[],
-  userMessage: string,
-  fullTextRef: { value: string },
-  options: DirectRunOptions = { headed: false, integrated: false },
-  timeoutMs?: number
-): Promise<void> {
-  const commandLine = [command, ...args].join(" ");
-  sendLog(win, `[runner] Running: ${commandLine}`);
-  sendDirectRunUpdate(win, { command: commandLine, tests: "running" });
-  win.webContents.send("pipeline:token", { token: `\n$ ${commandLine}\n` });
-
-  return new Promise<void>((resolve, reject) => {
-    const useShell = process.platform === "win32" && command.toLowerCase().endsWith(".cmd");
-    const child = spawn(command, args, {
-      cwd: projectPath,
-      shell: useShell,
-      env: {
-        ...process.env,
-        CI: options.headed ? process.env.CI : process.env.CI || "1",
-        ...(options.headed ? { HEADLESS: "false" } : {}),
-        ...(options.integrated ? {
-          HEADLESS: "false",
-          SPECWRIGHT_BROWSER_MODE: "cdp",
-          SPECWRIGHT_CDP_ENDPOINT: `http://127.0.0.1:${process.env.SPECWRIGHT_DESKTOP_CDP_PORT || "9333"}`,
-          SPECWRIGHT_CDP_TARGET_URL: options.targetUrl || process.env.SPECWRIGHT_CDP_TARGET_URL || "",
-        } : {}),
-        NO_UPDATE_NOTIFIER: "1",
-        npm_config_yes: "true",
-        npm_config_audit: "false",
-        npm_config_fund: "false",
-        PLAYWRIGHT_HTML_OPEN: "never",
-      },
-    });
-    activeTestProcess = child;
-    activeTestRunAborted = false;
-    child.stdin?.end();
-    if (child.pid) sendLog(win, `[runner] Process started: pid ${child.pid}`);
-
-    let timedOut = false;
-    let lastOutputAt = Date.now();
-    const startedAt = Date.now();
-    const heartbeat = setInterval(() => {
-      const idleMs = Date.now() - lastOutputAt;
-      if (idleMs < 5000) return;
-      const seconds = Math.round(idleMs / 1000);
-      const line = `\n[runner] Still running after ${seconds}s without output. ${describeLikelyWait(commandLine)}\n`;
-      fullTextRef.value += line;
-      win.webContents.send("pipeline:token", { token: line });
-      sendLog(win, line.trim());
-      lastOutputAt = Date.now();
-    }, 5000);
-    const timeout = timeoutMs
-      ? setTimeout(() => {
-        const seconds = Math.round((Date.now() - startedAt) / 1000);
-        const line = `[runner] Timeout after ${seconds}s: ${commandLine}. If this is BDD generation, run it once in the project terminal to inspect prompts/errors.`;
-        fullTextRef.value += `\n${line}\n`;
-        sendLog(win, line);
-        win.webContents.send("pipeline:token", { token: `\n${line}\n` });
-        timedOut = true;
-        child.kill();
-      }, timeoutMs)
-      : null;
-
-    const append = (chunk: Buffer): void => {
-      const text = chunk.toString();
-      lastOutputAt = Date.now();
-      fullTextRef.value += text;
-      win.webContents.send("pipeline:token", { token: text });
-      for (const line of text.split(/\r?\n/)) {
-        if (shouldShowTestCommandLog(line)) sendLog(win, line.trim());
-      }
-      const diagnostic = diagnoseOutput(text);
-      if (text.includes("authenticate")) sendDirectRunUpdate(win, { auth: "running" });
-      if (text.includes("Login successful") || text.includes("Saved storageState")) sendDirectRunUpdate(win, { auth: "done" });
-      if (/\b\d+\s+passed\b/.test(text)) sendDirectRunUpdate(win, { tests: "done" });
-      if (diagnostic) {
-        fullTextRef.value += `\n${diagnostic}\n`;
-        sendLog(win, diagnostic);
-        win.webContents.send("pipeline:token", { token: `\n${diagnostic}\n` });
-      }
-    };
-
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    child.on("error", (error) => {
-      clearInterval(heartbeat);
-      if (timeout) clearTimeout(timeout);
-      activeTestProcess = null;
-      activeTestRunPending = false;
-      const message = error instanceof Error ? error.message : String(error);
-      const line = `[runner] Failed to start command: ${message}`;
-      fullTextRef.value += `\n${line}\n`;
-      sendLog(win, line);
-      win.webContents.send("pipeline:token", { token: `\n${line}\n` });
-      const diagnostic = diagnoseOutput(message);
-      if (diagnostic) {
-        fullTextRef.value += `${diagnostic}\n`;
-        sendLog(win, diagnostic);
-        win.webContents.send("pipeline:token", { token: `${diagnostic}\n` });
-      }
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearInterval(heartbeat);
-      if (timeout) clearTimeout(timeout);
-      activeTestProcess = null;
-      activeTestRunPending = false;
-      if (activeTestRunAborted) {
-        const summary = "\n\nTest run aborted by user.";
-        fullTextRef.value += summary;
-        win.webContents.send("pipeline:token", { token: summary });
-        win.webContents.send("pipeline:aborted", { fullText: fullTextRef.value, userMessage });
-        resolve();
-        return;
-      }
-      if (timedOut) {
-        reject(new Error(`Command timed out: ${commandLine}`));
-        return;
-      }
-      if (code === 0) {
-        const line = `[runner] Completed: ${commandLine}`;
-        sendDirectRunUpdate(win, { tests: "done" });
-        fullTextRef.value += `\n${line}\n`;
-        sendLog(win, line);
-        win.webContents.send("pipeline:token", { token: `\n${line}\n` });
-        resolve();
-      } else {
-        sendDirectRunUpdate(win, { tests: "error" });
-        reject(new Error(`Command failed with exit code ${code ?? "unknown"}: ${commandLine}`));
-      }
-    });
-  });
+  return [...ids];
 }
 
 async function runE2eTestsDirect(win: BrowserWindow, projectPath: string, userMessage: string): Promise<void> {
@@ -769,11 +206,26 @@ async function runE2eTestsDirect(win: BrowserWindow, projectPath: string, userMe
   const runOptions = { ...options, targetUrl: envValues.BASE_URL };
   const run = { ...resolved, args: withIntegratedBrowserArgs(normalizePackageRunArgs(resolved.args), runOptions) };
   const commandLine = [run.command, ...run.args].join(" ");
+  const agentRunnerModule = await loadAiSdkRunner();
+  const specwrightRun = agentRunnerModule.createSpecwrightRun({
+    kind: "e2e-run",
+    projectPath,
+    title: `Specwright /e2e-run: ${commandLine}`,
+  });
+  activeSpecwrightRun = createActiveSpecwrightRun(agentRunnerModule, specwrightRun);
+  activeSpecwrightRun.update({ status: "running" });
   sendLog(win, `[runner] Working directory: ${projectPath}`);
   sendLog(win, `[runner] Resolution: ${run.reason}`);
-  if (runOptions.headed) sendLog(win, `[runner] Browser mode: visible Playwright window (HEADLESS=false)`);
-  if (runOptions.integrated) sendLog(win, `[runner] Browser mode: Desktop integrated browser via CDP (${runOptions.targetUrl || "no target URL"})`);
+  if (runOptions.headed) {
+    sendLog(win, `[runner] Browser mode: visible Playwright window (HEADLESS=false)`);
+  }
+
+  if (runOptions.integrated) {
+    sendLog(win, `[runner] Browser mode: Desktop integrated browser via CDP (${runOptions.targetUrl || "no target URL"})`);
+  }
   sendLog(win, `[runner] Running tests directly: ${commandLine}`);
+  sendLog(win, `[orchestrator] Run ${specwrightRun.id} registered in .specwright/runs/`);
+  sendLog(win, `[orchestrator] CLI: specwright-agent inspect ${specwrightRun.id}`);
   sendDirectRunUpdate(win, { command: commandLine, cwd: projectPath, localApps: "pending", auth: "pending", tests: "pending" });
   win.webContents.send("pipeline:token", {
     token: [
@@ -790,26 +242,151 @@ async function runE2eTestsDirect(win: BrowserWindow, projectPath: string, userMe
   const fullTextRef = { value: "" };
   let managedLocalApps: ManagedLocalApp[] = [];
   try {
-    managedLocalApps = await ensureLocalApps(win, projectPath);
+    managedLocalApps = await ensureLocalApps(projectPath, {
+      onLog: (line) => sendLog(win, line),
+      onUpdate: (patch) => sendDirectRunUpdate(win, patch),
+      onProcessStarted: (process) => {
+        activeManagedAppProcesses.push(process);
+        if (process.pid) activeSpecwrightRun?.registerProcessId(process.pid);
+      },
+      onProcessExit: (process) => {
+        activeManagedAppProcesses = activeManagedAppProcesses.filter((activeProcess) => activeProcess !== process);
+      },
+    });
     const beforeStats = collectGeneratedSpecStats(projectPath);
+    const beforeFiles = createSpecwrightFileSnapshot(projectPath);
     sendLog(win, `[runner] Before package script: ${formatGeneratedStats(beforeStats)}`);
-    await runChildCommand(win, projectPath, run.command, run.args, userMessage, fullTextRef, runOptions);
-    if (activeTestRunAborted) return;
+    await runChildCommand({
+      projectPath,
+      command: run.command,
+      args: run.args,
+      userMessage,
+      fullTextRef,
+      options: runOptions,
+      events: {
+        onLog: (line) => sendLog(win, line),
+        onToken: (token) => win.webContents.send("pipeline:token", { token }),
+        onUpdate: (patch) => sendDirectRunUpdate(win, patch),
+        onAborted: (fullText, abortedUserMessage) => {
+          activeSpecwrightRun?.appendLog("[runner] Test run aborted by user");
+          activeSpecwrightRun?.update({ status: "aborted" });
+          win.webContents.send("pipeline:aborted", { fullText, userMessage: abortedUserMessage });
+        },
+        onProcessStarted: (process) => {
+          activeTestProcess = process;
+          activeTestRunAborted = false;
+          if (process.pid) activeSpecwrightRun?.registerProcessId(process.pid);
+        },
+        onProcessEnded: () => {
+          activeTestProcess = null;
+          activeTestRunPending = false;
+        },
+        isAborted: () => activeTestRunAborted,
+      },
+    });
+    if (activeTestRunAborted) {
+      activeSpecwrightRun?.update({ status: "aborted" });
+      return;
+    }
     const afterStats = collectGeneratedSpecStats(projectPath);
+    persistRunFileDiff(agentRunnerModule, projectPath, specwrightRun.id, beforeFiles, win);
     const changed = afterStats.count !== beforeStats.count || afterStats.latestMtimeMs > beforeStats.latestMtimeMs;
     sendLog(win, `[runner] After package script: ${formatGeneratedStats(afterStats)}${changed ? " — generated/updated" : " — no generated spec timestamp change detected"}`);
     const summary = `\n\nTest command exited with code 0.`;
     fullTextRef.value += summary;
     win.webContents.send("pipeline:token", { token: summary });
     win.webContents.send("pipeline:done", { fullText: fullTextRef.value, sessionId: null, userMessage });
+    activeSpecwrightRun?.update({ status: "done" });
   } catch (error) {
-    if (activeTestRunAborted) return;
+    if (activeTestRunAborted) {
+      activeSpecwrightRun?.update({ status: "aborted" });
+      return;
+    }
     const msg = error instanceof Error ? error.message : String(error);
+    activeSpecwrightRun?.appendLog(`[runner] Error: ${msg}`);
+    activeSpecwrightRun?.update({ status: "error", error: msg });
     win.webContents.send("pipeline:error", { error: msg });
     throw error;
   } finally {
-    stopManagedLocalApps(win, managedLocalApps);
+    stopManagedLocalApps(managedLocalApps, {
+      onLog: (line) => sendLog(win, line),
+      onProcessExit: (process) => {
+        activeManagedAppProcesses = activeManagedAppProcesses.filter((activeProcess) => activeProcess !== process);
+      },
+    });
+    activeTestRunPending = false;
+    activeSpecwrightRun = null;
   }
+}
+
+function createActiveSpecwrightRun(
+  agentRunnerModule: AiSdkRunnerModule,
+  specwrightRun: { id: string; projectPath: string }
+): NonNullable<typeof activeSpecwrightRun> {
+  const processIds: number[] = [];
+  return {
+    id: specwrightRun.id,
+    projectPath: specwrightRun.projectPath,
+    processIds,
+    appendLog: (line: string) => agentRunnerModule.appendSpecwrightRunLog(specwrightRun.projectPath, specwrightRun.id, line),
+    update: (patch: Record<string, unknown>) => {
+      agentRunnerModule.updateSpecwrightRun(specwrightRun.projectPath, specwrightRun.id, patch);
+    },
+    addPermission: (input) => {
+      agentRunnerModule.addSpecwrightRunPermission(specwrightRun.projectPath, specwrightRun.id, input);
+    },
+    respondPermission: async (permissionId: string, allowed: boolean) => {
+      await agentRunnerModule.respondSpecwrightRunPermission(specwrightRun.projectPath, specwrightRun.id, permissionId, allowed);
+    },
+    registerProcessId: (processId: number) => {
+      if (processIds.includes(processId)) {
+        return;
+      }
+      processIds.push(processId);
+      agentRunnerModule.updateSpecwrightRun(specwrightRun.projectPath, specwrightRun.id, { processIds });
+      agentRunnerModule.appendSpecwrightRunLog(specwrightRun.projectPath, specwrightRun.id, `[orchestrator] Registered process pid ${processId}`);
+    },
+  };
+}
+
+function persistRunFileDiff(
+  agentRunnerModule: AiSdkRunnerModule,
+  projectPath: string,
+  runId: string,
+  beforeFiles: SpecwrightFileSnapshot | null,
+  win: BrowserWindow
+): void {
+  if (!beforeFiles) return;
+
+  const afterFiles = createSpecwrightFileSnapshot(projectPath);
+  const fileDiff = createSpecwrightFileDiff(beforeFiles, afterFiles);
+  if (fileDiff.changedFiles.length === 0) {
+    agentRunnerModule.appendSpecwrightRunLog(projectPath, runId, "[orchestrator] File diff: no Specwright test files changed");
+    return;
+  }
+
+  agentRunnerModule.writeSpecwrightRunDiff(projectPath, runId, fileDiff.diff, fileDiff.changedFiles);
+  sendLog(win, `[orchestrator] File diff: ${fileDiff.changedFiles.length} changed file(s)`);
+}
+
+function waitForRecordedPermissionResponse(agentRunnerModule: AiSdkRunnerModule, projectPath: string, runId: string, permissionId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      const run = agentRunnerModule.getSpecwrightRun(projectPath, runId);
+      const permission = run
+        ?.permissionHistory
+        ?.find((entry) => entry.id === permissionId);
+      if (permission?.status === "approved" || permission?.status === "denied") {
+        clearInterval(interval);
+        resolve(permission.status === "approved");
+        return;
+      }
+      if (run?.status === "aborted" || run?.status === "error" || run?.status === "done") {
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 1000);
+  });
 }
 
 export function registerPipelineIpc(
@@ -832,7 +409,9 @@ export function registerPipelineIpc(
       }
     ) => {
       const win = getWindow();
-      if (!win) return;
+      if (!win) {
+        return;
+      }
 
       const projectPath = configService.getProjectPath() || undefined;
 
@@ -913,28 +492,27 @@ export function registerPipelineIpc(
         ].join('\n');
       }
 
-      // Append env credentials and auth instructions to user message
+      // Append non-sensitive environment status to user message. Secrets are
+      // passed only through process env/tool context and never echoed to the LLM.
       let userMessage = payload.userMessage;
       // HEADLESS=false in .env.testing → show browser during exploration (default: headless)
       const headless = projectPath ? projectService.readEnv(projectPath)["HEADLESS"] !== "false" : true;
       if (projectPath) {
         const env = projectService.readEnv(projectPath);
         const lines: string[] = [];
-        const PIPELINE_VARS = new Set([
-          "BASE_URL", "TEST_ENV", "AUTH_STRATEGY",
-          "TEST_USER_EMAIL", "TEST_USER_PASSWORD",
-          "TEST_USERNAME", "TEST_PASSWORD",
-          // Auth identity — needed by planner agent for localStorage injection
-          "TEST_USER_NAME", "TEST_USER_PICTURE",
-          "OAUTH_STORAGE_KEY", "OAUTH_SIGNIN_PATH", "OAUTH_BUTTON_TEST_ID",
-        ]);
-        for (const [k, v] of Object.entries(env)) {
-          if (PIPELINE_VARS.has(k) && v) lines.push(`${k}: ${v}`);
+        const PIPELINE_VARS = new Set(["BASE_URL", "TEST_ENV", "AUTH_STRATEGY", "OAUTH_SIGNIN_PATH", "OAUTH_BUTTON_TEST_ID"]);
+        const SENSITIVE_PIPELINE_VARS = new Set(["TEST_USER_EMAIL", "TEST_USER_PASSWORD", "TEST_USERNAME", "TEST_PASSWORD", "TEST_USER_NAME", "TEST_USER_PICTURE", "OAUTH_STORAGE_KEY"]);
+        for (const [envKey, envValue] of Object.entries(env)) {
+          if (PIPELINE_VARS.has(envKey) && envValue) {
+            lines.push(`${envKey}: ${envValue}`);
+          } else if (SENSITIVE_PIPELINE_VARS.has(envKey) && envValue) {
+            lines.push(`${envKey}: [set]`);
+          }
         }
         if (lines.length) {
           userMessage += `\n\n---\nEnvironment configuration:\n${lines.join("\n")}`;
           win.webContents.send("pipeline:log", {
-            line: `[pipeline] Credentials injected (${lines.length} vars)`,
+            line: `[pipeline] Environment status added (${lines.length} vars, secrets redacted)`,
           });
         }
 
@@ -952,142 +530,103 @@ export function registerPipelineIpc(
         line: `[pipeline] System prompt: ${systemPrompt.length} chars`,
       });
 
-      // Load MCP servers: project's .mcp.json + always include Playwright MCP
-      const screenshotDir = projectPath
-        ? path.join(projectPath, ".playwright-mcp")
-        : ".playwright-mcp";
-
-      // Desktop is fully self-contained — hardcodes all 3 core MCP servers.
-      // No read of project .mcp.json; that file is only for CLI users.
-      //
-      // Both MCP servers are installed as local dependencies and unpacked from
-      // asar (see asarUnpack in electron-builder.yml) so Node can execute them
-      // directly without npx. require.resolve returns the virtual asar path even
-      // when asarUnpack is set — replace app.asar with app.asar.unpacked so the
-      // external node process can actually read the file off disk.
-      const playwrightMcpCli = path.join(
-        path.dirname(require.resolve("@playwright/mcp/package.json"))
-          .replace("app.asar" + path.sep, "app.asar.unpacked" + path.sep),
-        "cli.js"
-      );
-      fileLog(`[pipeline] playwright-mcp cli → ${playwrightMcpCli}`);
-      const mcpServers: Record<string, Record<string, unknown>> = {
-        "playwright-test": {
-          command: resolveNodePath(),
-          args: [
-            playwrightMcpCli,
-            "--output-dir", screenshotDir,
-            ...(headless ? ["--headless"] : []),
-          ],
-        },
-        "markitdown": {
-          // In packaged app: use bundled uvx from extraResources (downloaded by beforePack).
-          // In dev: fall back to system uvx.
-          command: app.isPackaged
-            ? path.join(process.resourcesPath, "bin", process.platform === "win32" ? "uvx.exe" : "uvx")
-            : "uvx",
-          args: ["markitdown-mcp"],
-        },
-        "atlassian": await (async () => {
-          const token = await getAtlassianAccessToken();
-          return {
-            type: "streamable-http",
-            url: "https://mcp.atlassian.com/v1/mcp",
-            ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-          };
-        })(),
-      };
+      const mcpServers = await createDesktopMcpServers({
+        projectPath,
+        headless,
+        getAtlassianAccessToken,
+      });
 
       win.webContents.send("pipeline:log", {
         line: `[pipeline] MCP servers: ${Object.keys(mcpServers).join(", ")}`,
       });
 
-      // Determine which provider to use
-      const provider = projectPath
-        ? (projectService.readEnv(projectPath)["SPECWRIGHT_LLM_PROVIDER"] as string ?? "anthropic").toLowerCase()
-        : "anthropic";
+      const projectEnv = projectPath ? projectService.readEnv(projectPath) : {};
+      const provider = ((projectEnv["SPECWRIGHT_LLM_PROVIDER"] as string | undefined)
+        || process.env.SPECWRIGHT_LLM_PROVIDER
+        || "opencode").toLowerCase();
 
       pendingPermissions.clear();
 
       try {
         let fullText: string;
+        const beforeFiles = projectPath ? createSpecwrightFileSnapshot(projectPath) : null;
 
         if (provider === "opencode") {
           // ── AiSdkRunner + OpenCode direct path ──
           win.webContents.send("pipeline:log", { line: `[pipeline] Launching OpenCode runner…` });
 
           // Set env vars so AiSdkRunner can read them
-          const env = projectPath ? projectService.readEnv(projectPath) : {};
-          for (const [k, v] of Object.entries(env)) {
-            if (v) process.env[k] = v;
-          }
-
-          const ocUrl = (env["SPECWRIGHT_OPENCODE_URL"] as string) || "http://127.0.0.1:18789";
-          const port = new URL(ocUrl).port ? parseInt(new URL(ocUrl).port, 10) : 18789;
-
-          // Auto-start opencode server if not running
-          try {
-            const healthRes = await fetch(`${ocUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
-            if (!healthRes.ok) throw new Error("not healthy");
-          } catch {
-            win.webContents.send("pipeline:log", { line: `[pipeline] Starting opencode serve on port ${port}…` });
-            const { spawn } = await import("child_process");
-            spawn("opencode", ["serve", "--port", String(port)], {
-              stdio: "ignore",
-              shell: process.platform === "win32",
-              detached: true,
-              cwd: projectPath ?? undefined,
-            });
-            await new Promise((r) => setTimeout(r, 3000));
-          }
-
-          // Detect model from server only if user didn't explicitly set one
-          let model = (env["SPECWRIGHT_MODEL"] as string) || "";
-          if (!model) {
-            try {
-              const provRes = await fetch(`${ocUrl}/provider`, { signal: AbortSignal.timeout(5000) });
-              if (provRes.ok) {
-                const provData = await provRes.json() as { default: Record<string, string>; connected: string[] };
-                const pid =
-                  provData.connected.find((p: string) => {
-                    const id = p.toLowerCase();
-                    return (id.includes("openai") || id.includes("chatgpt")) && provData.default[p];
-                  }) ??
-                  provData.connected.find((p: string) => provData.default[p]) ??
-                  provData.connected[0];
-                if (pid && provData.default[pid]) {
-                  model = provData.default[pid];
-                  win.webContents.send("pipeline:log", { line: `[pipeline] Detected model: ${model} (${pid})` });
-                }
-              }
-            } catch {
-              // use default model
+          const env = projectEnv;
+          for (const [envKey, envValue] of Object.entries(env)) {
+            if (envValue) {
+              process.env[envKey] = envValue;
             }
           }
-          if (!model) model = "gpt-5.5-fast";
 
-          const { AiSdkRunner } = await loadAiSdkRunner();
+          const { baseUrl: ocUrl, port } = resolveOpenCodeUrl(env["SPECWRIGHT_OPENCODE_URL"] || process.env.SPECWRIGHT_OPENCODE_URL);
+          const agentRunnerModule = await loadAiSdkRunner();
+          const { AiSdkRunner } = agentRunnerModule;
+          if (projectPath) {
+            const specwrightRun = agentRunnerModule.createSpecwrightRun({
+              kind: "e2e-automate",
+              projectPath,
+              title: "Specwright /e2e-automate",
+              opencodeBaseUrl: ocUrl,
+            });
+            activeSpecwrightRun = createActiveSpecwrightRun(agentRunnerModule, specwrightRun);
+            activeSpecwrightRun.update({ status: "running" });
+            sendLog(win, `[orchestrator] Run ${specwrightRun.id} registered in .specwright/runs/`);
+            sendLog(win, `[orchestrator] CLI: specwright-agent inspect ${specwrightRun.id}`);
+            sendLog(win, `[orchestrator] OpenCode: opencode attach ${ocUrl}`);
+          }
+
+          await startOpenCodeServer(win, projectPath, ocUrl, port);
+
+          const model = (env["SPECWRIGHT_MODEL"] as string) || process.env.SPECWRIGHT_MODEL || "gpt-5.5-fast";
+          process.env.SPECWRIGHT_MODEL = model;
+          win.webContents.send("pipeline:log", { line: `[pipeline] Model: ${model}` });
           const runner = new AiSdkRunner();
           activeClaudeRunner = runner;
+          let openCodeSession: { sessionId: string; baseUrl: string } | null = null;
+          let childSessionIds: string[] = [];
+          const refreshOpenCodeChildSessions = async (): Promise<void> => {
+            if (!openCodeSession || !activeSpecwrightRun) return;
 
-          // Filter to only command-based MCPs (AiSdkRunner doesn't support HTTP MCPs)
-          const cmdMcps: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
-          for (const [name, cfg] of Object.entries(mcpServers)) {
-            if (cfg.command) cmdMcps[name] = cfg as { command: string; args?: string[]; env?: Record<string, string> };
-          }
+            try {
+              const nextChildSessionIds = await fetchOpenCodeChildSessionIds(openCodeSession.baseUrl, openCodeSession.sessionId);
+              if (nextChildSessionIds.join("\0") === childSessionIds.join("\0")) return;
+
+              childSessionIds = nextChildSessionIds;
+              activeSpecwrightRun.update({ childSessionIds });
+              if (childSessionIds.length > 0) {
+                activeSpecwrightRun.appendLog(`[opencode] Child sessions: ${childSessionIds.join(", ")}`);
+              }
+            } catch (error) {
+              activeSpecwrightRun.appendLog(`[opencode] Failed to read child sessions: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          };
 
           fullText = await runner.run({
             systemPrompt,
             userMessage,
             model,
-            mcpServers: cmdMcps,
+            mcpServers: commandMcpServers(mcpServers),
             includePlaywrightMcp: false,
             projectPath: projectPath ?? undefined,
             onToken: (token: string) => {
               win.webContents.send("pipeline:token", { token });
             },
             onLog: (line: string) => {
+              activeSpecwrightRun?.appendLog(line);
               sendLog(win, line);
+            },
+            onOpenCodeSession: (info: { sessionId: string; baseUrl: string }) => {
+              openCodeSession = info;
+              activeSpecwrightRun?.update({ status: "running", opencodeSessionId: info.sessionId, opencodeBaseUrl: info.baseUrl });
+              activeSpecwrightRun?.appendLog(`[opencode] Session: ${info.sessionId}`);
+              sendLog(win, `[orchestrator] OpenCode session: ${info.sessionId}`);
+              sendLog(win, `[orchestrator] Continue in CLI: opencode attach ${info.baseUrl} --session ${info.sessionId}`);
+              void refreshOpenCodeChildSessions();
             },
             onToolEnd: (toolName: string, durationMs: number) => {
               win.webContents.send("pipeline:tool-end", { toolName, toolId: "", durationMs });
@@ -1096,31 +635,31 @@ export function registerPipelineIpc(
           });
 
           win.webContents.send("pipeline:log", { line: "[pipeline] Done" });
+          await refreshOpenCodeChildSessions();
+          activeSpecwrightRun?.update({ status: "done" });
         } else {
           // ── claude-runner ──
           win.webContents.send("pipeline:log", { line: `[pipeline] Launching Claude Runner…` });
 
           const { Runner } = await loadClaudeRunner();
-
-          const mcpConfig: Record<string, string | { command: string; args?: string[]; env?: Record<string, string> } | { type: "http"; url: string; headers?: Record<string, string> }> = {};
-          for (const [name, config] of Object.entries(mcpServers)) {
-            if (config.url) {
-              // HTTP-based MCP (streamable-http or http) — claude-runner uses type: "http"
-              mcpConfig[name] = {
-                type: "http",
-                url: config.url as string,
-                ...(config.headers ? { headers: config.headers as Record<string, string> } : {}),
-              };
-            } else {
-              mcpConfig[name] = config as { command: string; args?: string[]; env?: Record<string, string> };
-            }
+          const agentRunnerModule = await loadAiSdkRunner();
+          if (projectPath) {
+            const specwrightRun = agentRunnerModule.createSpecwrightRun({
+              kind: "e2e-automate",
+              projectPath,
+              title: "Specwright /e2e-automate",
+            });
+            activeSpecwrightRun = createActiveSpecwrightRun(agentRunnerModule, specwrightRun);
+            activeSpecwrightRun.update({ status: "running" });
+            sendLog(win, `[orchestrator] Run ${specwrightRun.id} registered in .specwright/runs/`);
+            sendLog(win, `[orchestrator] CLI: specwright-agent inspect ${specwrightRun.id}`);
           }
 
-          const claudePath = resolveClaudePath();
+          const claudePath = resolveClaudeExecutablePath();
           const runner = new Runner({
             cwd: projectPath,
             systemPrompt: systemPrompt ? { preset: "claude_code" as const, append: systemPrompt } : undefined,
-            mcp: mcpConfig,
+            mcp: claudeMcpConfig(mcpServers),
             // When the user has toggled "Skip permissions" in the Desktop UI they've
             // opted in to a trusted run. Use the SDK's `bypassPermissions` mode
             // (via sdkOptions) — this skips the classifier LLM call per tool,
@@ -1131,6 +670,12 @@ export function registerPipelineIpc(
             // interactive approval flow (the safer default for untrusted runs).
             permissions: payload.skipPermissions ? "auto" : "prompt",
             onPermission: async (req) => {
+              activeSpecwrightRun?.addPermission({
+                id: req.id,
+                toolName: req.tool,
+                toolInput: req.input ?? {},
+                description: req.description,
+              });
               win.webContents.send("pipeline:permission-request", {
                 id: req.id,
                 toolName: req.tool,
@@ -1139,6 +684,16 @@ export function registerPipelineIpc(
               });
               return new Promise<boolean>((resolve) => {
                 pendingPermissions.set(req.id, resolve);
+                if (activeSpecwrightRun) {
+                  void waitForRecordedPermissionResponse(agentRunnerModule, activeSpecwrightRun.projectPath, activeSpecwrightRun.id, req.id).then((allowed) => {
+                    if (!pendingPermissions.has(req.id)) return;
+                    pendingPermissions.delete(req.id);
+                    resolve(allowed);
+                    win.webContents.send("pipeline:log", {
+                      line: `[permission] ${allowed ? "Allowed" : "Denied"} from run registry (${req.id.slice(0, 8)}…)`,
+                    });
+                  });
+                }
               });
             },
             sdkOptions: {
@@ -1252,13 +807,26 @@ export function registerPipelineIpc(
           }
         }
 
+        activeSpecwrightRun?.update({ status: "done" });
+        if (projectPath && activeSpecwrightRun) {
+          const agentRunnerModule = await loadAiSdkRunner();
+          persistRunFileDiff(agentRunnerModule, projectPath, activeSpecwrightRun.id, beforeFiles, win);
+        }
         win.webContents.send("pipeline:done", { fullText, sessionId: lastSessionId, userMessage });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+        activeSpecwrightRun?.appendLog(`[pipeline] Error: ${msg}`);
+        activeSpecwrightRun?.update({ status: "error", error: msg });
         win.webContents.send("pipeline:error", { error: msg });
       } finally {
         activeClaudeRunner = null;
         activeStream = null;
+        if (activeOpenCodeServerProcess) {
+          win.webContents.send("pipeline:log", { line: "[pipeline] Stopping OpenCode server" });
+          killProcessTree(activeOpenCodeServerProcess);
+          activeOpenCodeServerProcess = null;
+        }
+        activeSpecwrightRun = null;
         pendingPermissions.clear();
       }
     }
@@ -1268,27 +836,42 @@ export function registerPipelineIpc(
     const win = getWindow();
     if (activeTestProcess) {
       activeTestRunAborted = true;
-      if (win) sendLog(win, "[pipeline] Abort requested — stopping test process");
-      activeTestProcess.kill();
-      for (const process of activeManagedAppProcesses) process.kill();
+      if (win) {
+        sendLog(win, "[pipeline] Abort requested — stopping test process");
+      }
+      activeSpecwrightRun?.appendLog("[pipeline] Abort requested — stopping test process");
+      activeSpecwrightRun?.update({ status: "aborted" });
+      killProcessTree(activeTestProcess);
+      for (const process of activeManagedAppProcesses) killProcessTree(process);
       activeManagedAppProcesses = [];
       pendingPermissions.clear();
       return { ok: true, state: "aborting" };
     }
     if (activeTestRunPending) {
       activeTestRunAborted = true;
-      if (win) sendLog(win, "[pipeline] Abort requested — waiting for test process to start");
-      for (const process of activeManagedAppProcesses) process.kill();
+      if (win) {
+        sendLog(win, "[pipeline] Abort requested — waiting for test process to start");
+      }
+      activeSpecwrightRun?.appendLog("[pipeline] Abort requested — waiting for test process to start");
+      activeSpecwrightRun?.update({ status: "aborted" });
+      for (const process of activeManagedAppProcesses) killProcessTree(process);
       activeManagedAppProcesses = [];
       pendingPermissions.clear();
       return { ok: true, state: "aborting" };
     }
     if (activeClaudeRunner) {
       win?.webContents.send("pipeline:log", { line: "[pipeline] Abort requested — stopping model run" });
+      activeSpecwrightRun?.appendLog("[pipeline] Abort requested — stopping model run");
+      activeSpecwrightRun?.update({ status: "aborted" });
       win?.webContents.send("pipeline:token", { token: "\n\nAbort requested. Stopping run..." });
       activeClaudeRunner.abort();
       activeClaudeRunner = null;
       activeStream = null;
+      if (activeOpenCodeServerProcess) {
+        killProcessTree(activeOpenCodeServerProcess);
+        activeOpenCodeServerProcess = null;
+      }
+      activeSpecwrightRun = null;
       win?.webContents.send("pipeline:aborted", { fullText: "Aborted by user", userMessage: "" });
       pendingPermissions.clear();
       return { ok: true, state: "aborted" };
@@ -1339,6 +922,7 @@ export function registerPipelineIpc(
       if (resolve) {
         resolve(allowed);
         pendingPermissions.delete(requestId);
+        void activeSpecwrightRun?.respondPermission(requestId, allowed);
         const win = getWindow();
         win?.webContents.send("pipeline:log", {
           line: `[permission] ${allowed ? "Allowed" : "Denied"} (${requestId.slice(0, 8)}…)`,
@@ -1360,62 +944,7 @@ export function registerPipelineIpc(
   });
   ipcMain.handle("pipeline:clear-logs", () => clearLocalLogs());
 
-  // Read context files (plan + seed) for continuation prompts
   ipcMain.handle("pipeline:read-context-files", async () => {
-    const projPath = configService.getProjectPath();
-    if (!projPath) return { plan: "", seed: "", conventions: "" };
-
-    const readFile = (relPath: string): string => {
-      const full = path.join(projPath, relPath);
-      if (fs.existsSync(full)) return fs.readFileSync(full, "utf-8");
-      return "";
-    };
-
-    // Find the most recent plan file
-    const plansDir = path.join(projPath, "e2e-tests/plans");
-    let planContent = "";
-    if (fs.existsSync(plansDir)) {
-      const planFiles = fs.readdirSync(plansDir)
-        .filter(f => f.endsWith(".md") || f.endsWith("-plan.md"))
-        .sort((a, b) => {
-          const sa = fs.statSync(path.join(plansDir, a)).mtimeMs;
-          const sb = fs.statSync(path.join(plansDir, b)).mtimeMs;
-          return sb - sa; // newest first
-        });
-      if (planFiles.length > 0) {
-        planContent = fs.readFileSync(path.join(plansDir, planFiles[0]), "utf-8");
-      }
-    }
-
-    const seedContent = readFile("e2e-tests/playwright/generated/seed.spec.js");
-
-    const agentFiles = [
-      ".claude/agents/code-generator.md",
-      ".claude/agents/bdd-generator.md",
-    ];
-    const agentContents: string[] = [];
-    for (const rel of agentFiles) {
-      const content = readFile(rel);
-      if (content) {
-        const body = content.replace(/^---[\s\S]*?---\n?/, "").trim();
-        agentContents.push(`## ${path.basename(rel, ".md")} agent instructions\n\n${body}`);
-      }
-    }
-
-    const testConfigContent = readFile("e2e-tests/data/testConfig.js");
-    if (testConfigContent) {
-      agentContents.push(`## testConfig.js (routes and timeouts)\n\`\`\`javascript\n${testConfigContent}\n\`\`\``);
-    }
-
-    const conventions = agentContents.length > 0
-      ? agentContents.join("\n\n---\n\n")
-      : [
-          "- Import fixtures from: e2e-tests/playwright/fixtures.js",
-          "- Shared steps in: e2e-tests/features/playwright-bdd/shared/",
-          "- processDataTable + validateExpectations from: e2e-tests/utils/stepHelpers.js",
-          "- 3-column data tables: Field Name | Value | Type",
-        ].join("\n");
-
-    return { plan: planContent, seed: seedContent, conventions };
+    return readPipelineContextFiles(configService.getProjectPath() || undefined);
   });
 }

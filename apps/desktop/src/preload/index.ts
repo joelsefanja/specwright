@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+// The preload script is Specwright's safe IPC bridge. React code talks to the
+// typed window.specwright API below; only this file can forward those calls to
+// Electron's main process, where filesystem, process, and shell access live.
+
 interface ExploreResultData {
   url: string;
   title: string;
@@ -28,7 +32,7 @@ contextBridge.exposeInMainWorld("specwright", {
     gitLabStatus: (folderPath: string) =>
       ipcRenderer.invoke("project:gitlab-status", folderPath) as Promise<{ hasGlab: boolean; authenticated: boolean; repo?: string; username?: string | null; error?: string }>,
     readGitLabSource: (folderPath: string, relativePath: string) =>
-      ipcRenderer.invoke("project:read-gitlab-source", folderPath, relativePath) as Promise<{ markdown: string; images: string[] }>,
+      ipcRenderer.invoke("project:read-gitlab-source", folderPath, relativePath) as Promise<{ markdown: string; images: string[]; missing?: boolean }>,
     bootstrap: (folderPath: string, options?: { skipAuth?: boolean; authStrategy?: string; overlay?: { type: "local"; dirPath: string } | { type: "npm"; packageName: string; registry?: string } }) =>
       ipcRenderer.invoke("project:bootstrap", folderPath, options),
     validatePlugin: (dirPath: string) =>
@@ -181,6 +185,17 @@ contextBridge.exposeInMainWorld("specwright", {
       ipcRenderer.invoke("network:verify", baseUrl) as Promise<{ ok: boolean; message: string }>,
   },
 
+  requirements: {
+    check: (projectPath: string) =>
+      ipcRenderer.invoke("requirements:check", projectPath) as Promise<unknown>,
+    install: (payload: { projectPath: string; action: "project-dependencies" | "playwright-chromium" }) =>
+      ipcRenderer.invoke("requirements:install", payload) as Promise<{ ok: boolean; error?: string }>,
+    onInstallLog: (cb: (data: { line: string }) => void) => {
+      ipcRenderer.on("requirements:install-log", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("requirements:install-log");
+    },
+  },
+
   opencode: {
     health: (baseUrl: string) =>
       ipcRenderer.invoke("opencode:health", baseUrl) as Promise<{ ok: boolean }>,
@@ -194,16 +209,81 @@ contextBridge.exposeInMainWorld("specwright", {
       ipcRenderer.invoke("opencode:stop-server") as Promise<{ ok: boolean }>,
     serverStatus: () =>
       ipcRenderer.invoke("opencode:server-status") as Promise<{ running: boolean }>,
+    openAttachTerminal: (payload: { baseUrl: string; sessionId: string; cwd?: string }) =>
+      ipcRenderer.invoke("opencode:open-attach-terminal", payload) as Promise<{ ok: boolean; error?: string }>,
+    startAttachStream: (payload: { attachId?: string; baseUrl: string; sessionId: string; cwd?: string }) =>
+      ipcRenderer.invoke("opencode:start-attach-stream", payload) as Promise<{ ok: boolean; attachId?: string; error?: string }>,
+    stopAttachStream: (attachId: string) =>
+      ipcRenderer.invoke("opencode:stop-attach-stream", attachId) as Promise<{ ok: boolean }>,
+    sendAttachInput: (payload: { attachId: string; input: string }) =>
+      ipcRenderer.invoke("opencode:send-attach-input", payload) as Promise<{ ok: boolean; error?: string }>,
+    resizeAttachStream: (payload: { attachId: string; cols: number; rows: number }) =>
+      ipcRenderer.invoke("opencode:resize-attach-stream", payload) as Promise<{ ok: boolean }>,
+    onAttachOutput: (cb: (data: { attachId: string; stream: "stdout" | "stderr"; chunk: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { attachId: string; stream: "stdout" | "stderr"; chunk: string }) => cb(data);
+      ipcRenderer.on("opencode:attach-output", listener);
+      return () => ipcRenderer.removeListener("opencode:attach-output", listener);
+    },
+    onAttachExit: (cb: (data: { attachId: string; code: number | null; error?: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { attachId: string; code: number | null; error?: string }) => cb(data);
+      ipcRenderer.on("opencode:attach-exit", listener);
+      return () => ipcRenderer.removeListener("opencode:attach-exit", listener);
+    },
   },
 
   report: {
     checkAvailable: (projectPath: string) =>
-      ipcRenderer.invoke("report:check-available", projectPath) as Promise<{ playwright: boolean; bdd: boolean }>,
+      ipcRenderer.invoke("report:check-available", projectPath) as Promise<{ playwright: boolean; bdd: boolean; allure: boolean }>,
     openPlaywright: (projectPath: string) =>
       ipcRenderer.invoke("report:open-playwright", projectPath) as Promise<void>,
     openBdd: (projectPath: string) =>
       ipcRenderer.invoke("report:open-bdd", projectPath) as Promise<void>,
+    openAllure: (projectPath: string) =>
+      ipcRenderer.invoke("report:open-allure", projectPath) as Promise<void>,
     startTestReport: (projectPath: string) =>
       ipcRenderer.invoke("report:start-test-report", projectPath) as Promise<{ url: string }>,
+  },
+
+  runs: {
+    list: (projectPath?: string) =>
+      ipcRenderer.invoke("runs:list", projectPath) as Promise<unknown[]>,
+    inspect: (runId: string, projectPath?: string) =>
+      ipcRenderer.invoke("runs:inspect", runId, projectPath) as Promise<unknown>,
+    logs: (runId: string, projectPath?: string) =>
+      ipcRenderer.invoke("runs:logs", runId, projectPath) as Promise<string>,
+    diff: (runId: string, projectPath?: string) =>
+      ipcRenderer.invoke("runs:diff", runId, projectPath) as Promise<{ diff: string; changedFiles: string[] }>,
+    abort: (runId: string, projectPath?: string) =>
+      ipcRenderer.invoke("runs:abort", runId, projectPath) as Promise<unknown>,
+    respondPermission: (payload: { runId: string; permissionId: string; allowed: boolean; optionId?: string; projectPath?: string }) =>
+      ipcRenderer.invoke("runs:respond-permission", payload) as Promise<unknown>,
+  },
+
+  devFeedback: {
+    isE2E: process.env.SPECWRIGHT_E2E === "1",
+    captureScreenshot: (rect?: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.invoke("dev-feedback:capture-screenshot", rect) as Promise<{ ok: boolean; dataUrl?: string; error?: string }>,
+    run: (payload: { id?: string; prompt: string }) =>
+      ipcRenderer.invoke("dev-feedback:run", payload) as Promise<{ ok: boolean; id?: string; worktreePath?: string; error?: string }>,
+    applyWorktree: (payload: { worktreePath: string }) =>
+      ipcRenderer.invoke("dev-feedback:apply-worktree", payload) as Promise<{ ok: boolean; applied?: boolean; error?: string; errorCode?: "patch-conflict" | "apply-failed" }>,
+    cancel: (payload: { id: string }) =>
+      ipcRenderer.invoke("dev-feedback:cancel", payload) as Promise<{ ok: boolean; cancelled?: boolean; error?: string }>,
+    onToken: (cb: (data: { id?: string; token: string }) => void) => {
+      ipcRenderer.on("dev-feedback:token", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("dev-feedback:token");
+    },
+    onLog: (cb: (data: { id?: string; line: string }) => void) => {
+      ipcRenderer.on("dev-feedback:log", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("dev-feedback:log");
+    },
+    onDone: (cb: (data: { id?: string; fullText: string; worktreePath?: string }) => void) => {
+      ipcRenderer.on("dev-feedback:done", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("dev-feedback:done");
+    },
+    onError: (cb: (data: { id?: string; error: string }) => void) => {
+      ipcRenderer.on("dev-feedback:error", (_e, data) => cb(data));
+      return () => ipcRenderer.removeAllListeners("dev-feedback:error");
+    },
   },
 });

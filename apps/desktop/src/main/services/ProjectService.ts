@@ -1,34 +1,20 @@
 import * as fs from "fs";
 import * as path from "path";
-import { spawn } from "child_process";
+import { execSync, spawn } from "child_process";
+import type { ChildProcess } from "child_process";
 import { app } from "electron";
+import { killProcessTree } from "../pipeline/processTree";
+import { parseEnvFile, readTestingEnvVars, TestingEnvVars, writeTestingEnvVars } from "./projectEnvFiles";
+import { cardsToJsSource, parseInstructionCards } from "./projectInstructionCards";
+import type { InstructionCard } from "./projectInstructionCards";
+import { loadOrchestratorPrompt, loadSkillPrompt } from "./projectPrompts";
 
-export interface EnvVars {
-  BASE_URL: string;
-  TEST_ENV: string;
-  TEST_USERNAME?: string;
-  TEST_PASSWORD?: string;
-  [key: string]: string | undefined;
-}
+export type { InstructionCard } from "./projectInstructionCards";
+
+export interface EnvVars extends TestingEnvVars {}
 
 export interface InstructionStep {
   action: string;
-}
-
-export interface InstructionCard {
-  moduleName: string;
-  category: "@Modules" | "@Workflows";
-  subModules: string[];
-  fileName: string;
-  pageURL?: string;
-  steps: string[];
-  filePath?: string;
-  suitName?: string;
-  jiraURL?: string;
-  explore: boolean;
-  runExploredCases: boolean;
-  runGeneratedCases: boolean;
-  autoApprove: boolean;
 }
 
 export type ProjectState = "none" | "bootstrapping" | "ready" | "error";
@@ -76,11 +62,13 @@ export class ProjectService {
    * (which inherits only the minimal /usr/bin:/bin system PATH and would
    * otherwise fail to find node, npx, pnpm, etc.).
    */
-  private runStreamed(cmd: string, cwd: string, onLog?: (line: string) => void): Promise<number> {
+  private runStreamed(cmd: string, cwd: string, onLog?: (line: string) => void, onProcessStarted?: (process: ChildProcess) => void): Promise<number> {
     return new Promise((resolve) => {
-      // Prefer zsh (macOS default since Catalina); fall back to bash.
-      const shell = fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
-      const child = spawn(shell, ["-l", "-c", cmd], { cwd, detached: false });
+      // Prefer zsh (macOS default since Catalina); use cmd.exe on Windows.
+      const shell = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : fs.existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
+      const shellArgs = process.platform === "win32" ? ["/d", "/s", "/c", cmd] : ["-l", "-c", cmd];
+      const child = spawn(shell, shellArgs, { cwd, detached: false, windowsHide: true });
+      onProcessStarted?.(child);
       let settled = false;
 
       const done = (code: number): void => {
@@ -92,7 +80,7 @@ export class ProjectService {
       // Safety timeout — 3 minutes; resolves so bootstrap never hangs indefinitely
       const timer = setTimeout(() => {
         onLog?.("[bootstrap] WARNING: command timed out");
-        child.kill("SIGTERM");
+        killProcessTree(child);
         done(1);
       }, 180_000);
 
@@ -117,7 +105,8 @@ export class ProjectService {
   async bootstrap(
     projectPath: string,
     options: { skipAuth?: boolean; authStrategy?: AuthStrategy; overlay?: PluginSource } = {},
-    onLog?: (line: string) => void
+    onLog?: (line: string) => void,
+    onProcessStarted?: (process: ChildProcess) => void
   ): Promise<BootstrapResult> {
     const sentinelPath = path.join(projectPath, ".bootstrapping");
     try {
@@ -186,7 +175,7 @@ export class ProjectService {
       }
 
       onLog?.("[bootstrap] Installing base plugin...");
-      const pluginExit = await this.runStreamed(pluginCmd, projectPath, onLog);
+      const pluginExit = await this.runStreamed(pluginCmd, projectPath, onLog, onProcessStarted);
       if (pluginExit !== 0) {
         return { success: false, error: "Base plugin install failed" };
       }
@@ -202,7 +191,7 @@ export class ProjectService {
         if (fs.existsSync(installScript)) {
           onLog?.("[bootstrap] Installing overlay...");
           // --skip-install: Desktop already ran dependency install via base plugin step
-          await this.runStreamed(`bash "${installScript}" "${projectPath}" --skip-install`, projectPath, onLog);
+          await this.runStreamed(`bash "${installScript}" "${projectPath}" --skip-install`, projectPath, onLog, onProcessStarted);
           // Persist overlay info to .specwright.json for future boots.
           // Re-read the file so we merge with whatever cli.js wrote (e.g. plugin field).
           if (overlaySource) {
@@ -246,7 +235,7 @@ export class ProjectService {
           : "npm install --ignore-scripts";
         const pm = hasPnpmLock ? "pnpm" : hasYarnLock ? "yarn" : "npm";
         onLog?.(`[bootstrap] Installing dependencies (${pm})...`);
-        await this.runStreamed(installCmd, projectPath, onLog);
+        await this.runStreamed(installCmd, projectPath, onLog, onProcessStarted);
       }
 
       // Remove sentinel — bootstrap complete. isBootstrapped() will now return true.
@@ -260,52 +249,13 @@ export class ProjectService {
   }
 
   /**
-   * Parse a .env file into key-value pairs.
-   * Skips comments and empty lines.
-   */
-  private parseEnvFile(filePath: string): Record<string, string> {
-    if (!fs.existsSync(filePath)) return {};
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const result: Record<string, string> = {};
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 0) continue;
-      result[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
-    }
-    return result;
-  }
-
-  /**
    * Read testing-related env vars only.
    * Primary source: e2e-tests/.env.testing (plugin-installed template)
    * Fallback: .env for system keys (BASE_URL, TEST_ENV, TEST_USERNAME, TEST_PASSWORD)
    * Never exposes app-specific vars (VITE_*, API keys, etc.)
    */
   readEnv(projectPath: string): EnvVars {
-    const testingEnvPath = path.join(projectPath, "e2e-tests/.env.testing");
-    const rootEnvPath = path.join(projectPath, ".env");
-
-    // Start with minimal defaults — only BASE_URL is always needed
-    const result: EnvVars = { BASE_URL: "", TEST_ENV: "" };
-
-    // Read from .env.testing (primary — all testing vars)
-    const testingVars = this.parseEnvFile(testingEnvPath);
-    for (const [key, val] of Object.entries(testingVars)) {
-      result[key] = val;
-    }
-
-    // Fall back to .env ONLY for the 4 system keys if not already set from .env.testing
-    const systemKeys = ["BASE_URL", "TEST_ENV", "TEST_USERNAME", "TEST_PASSWORD"];
-    const rootVars = this.parseEnvFile(rootEnvPath);
-    for (const key of systemKeys) {
-      if (!result[key] && rootVars[key]) {
-        result[key] = rootVars[key];
-      }
-    }
-
-    return result;
+    return readTestingEnvVars(projectPath);
   }
 
   /**
@@ -313,16 +263,7 @@ export class ProjectService {
    * Never modifies the project's root .env (protects app secrets).
    */
   writeEnv(projectPath: string, vars: EnvVars): void {
-    const testingEnvPath = path.join(projectPath, "e2e-tests/.env.testing");
-    fs.mkdirSync(path.dirname(testingEnvPath), { recursive: true });
-
-    const lines: string[] = ["# E2E Testing Environment — managed by Specwright"];
-    for (const [key, val] of Object.entries(vars)) {
-      if (val !== undefined && val !== null) {
-        lines.push(`${key}=${val}`);
-      }
-    }
-    fs.writeFileSync(testingEnvPath, lines.join("\n") + "\n", "utf-8");
+    writeTestingEnvVars(projectPath, vars);
   }
 
   /** Resolve the instructions.js path for a project. */
@@ -332,42 +273,13 @@ export class ProjectService {
 
   readInstructions(projectPath: string): InstructionCard[] {
     const filePath = this.resolveInstructionsPath(projectPath);
-    if (!fs.existsSync(filePath)) return [];
+    if (!fs.existsSync(filePath)) {
+      return [];
+    }
 
     try {
       const raw = fs.readFileSync(filePath, "utf-8");
-      // Extract the array from ESM or CJS export (greedy match for full array)
-      const esmMatch = raw.match(/export\s+default\s+(\[[\s\S]*\]);?\s*$/m);
-      const cjsMatch = raw.match(/module\.exports\s*=\s*(\[[\s\S]*\]);?\s*$/m);
-      const match = esmMatch || cjsMatch;
-      if (!match) return [];
-
-      // The file uses JS syntax (single quotes, unquoted keys) — not valid JSON.
-      // Convert to valid JSON: replace single quotes with double quotes, add quotes to keys.
-      let jsArray = match[1].trim();
-      // Remove trailing semicolon if present
-      if (jsArray.endsWith(";")) jsArray = jsArray.slice(0, -1);
-
-      // Use Function() to safely evaluate the JS array literal
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      const evaluated = new Function(`return ${jsArray}`)() as Record<string, unknown>[];
-
-      // Map the pipeline format to InstructionCard format
-      return evaluated.map((entry) => ({
-        moduleName: (entry.moduleName as string) || "",
-        category: ((entry.category as string) || "@Modules") as "@Modules" | "@Workflows",
-        subModules: (entry.subModuleName as string[]) || (entry.subModules as string[]) || [],
-        fileName: (entry.fileName as string) || "",
-        pageURL: (entry.pageURL as string) || "",
-        steps: (entry.instructions as string[]) || (entry.steps as string[]) || [],
-        filePath: (entry.filePath as string) || "",
-        suitName: (entry.suitName as string) || "",
-        jiraURL: (entry.jiraURL as string) || (entry.jira as string) || ((entry.inputs as Record<string, Record<string, string>>)?.jira?.url) || "",
-        explore: entry.explore === true,
-        runExploredCases: entry.runExploredCases === true,
-        runGeneratedCases: entry.runGeneratedCases === true,
-        autoApprove: entry.autoApprove === true,
-      }));
+      return parseInstructionCards(raw);
     } catch (err) {
       console.error("[ProjectService] Failed to read instructions:", err);
       return [];
@@ -379,7 +291,7 @@ export class ProjectService {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
     // Write as proper JS object syntax (unquoted keys) instead of JSON
-    const jsArray = this.cardsToJsSource(cards);
+    const jsArray = cardsToJsSource(cards);
 
     // Detect if the existing file uses ESM or CJS, default to ESM
     let useEsm = true;
@@ -391,46 +303,6 @@ export class ProjectService {
       ? `// Auto-generated by Specwright — edit or regenerate via the UI\nexport default ${jsArray};\n`
       : `// Auto-generated by Specwright — edit or regenerate via the UI\nmodule.exports = ${jsArray};\n`;
     fs.writeFileSync(filePath, content, "utf-8");
-  }
-
-  /** Convert InstructionCard[] to a JS source string with unquoted keys and single quotes. */
-  private cardsToJsSource(cards: InstructionCard[]): string {
-    if (cards.length === 0) return "[]";
-
-    const q = (val: string): string => `'${val.replace(/'/g, "\\'")}'`;
-
-    const entries = cards.map((card) => {
-      const lines: string[] = [];
-      lines.push(`  {`);
-      lines.push(`    moduleName: ${q(card.moduleName)},`);
-      lines.push(`    category: ${q(card.category)},`);
-      lines.push(`    subModuleName: [${card.subModules.map(s => q(s)).join(", ")}],`);
-      lines.push(`    fileName: ${q(card.fileName)},`);
-      if (card.pageURL) lines.push(`    pageURL: ${q(card.pageURL)},`);
-      if (card.filePath) lines.push(`    filePath: ${q(card.filePath)},`);
-      if (card.suitName) lines.push(`    suitName: ${q(card.suitName)},`);
-      // Write inputs block — jiraURL maps to inputs.jira.url (canonical format)
-      if (card.jiraURL) {
-        lines.push(`    inputs: { jira: { url: ${q(card.jiraURL)} } },`);
-      } else {
-        lines.push(`    inputs: {},`);
-      }
-      if (card.steps.length > 0) {
-        lines.push(`    instructions: [`);
-        for (const step of card.steps) {
-          lines.push(`      ${q(step)},`);
-        }
-        lines.push(`    ],`);
-      }
-      lines.push(`    explore: ${card.explore},`);
-      lines.push(`    runExploredCases: ${card.runExploredCases},`);
-      lines.push(`    runGeneratedCases: ${card.runGeneratedCases},`);
-      lines.push(`    autoApprove: ${card.autoApprove ?? false},`);
-      lines.push(`  }`);
-      return lines.join("\n");
-    });
-
-    return `[\n${entries.join(",\n")}\n]`;
   }
 
   /**
@@ -606,7 +478,7 @@ export class ProjectService {
     const envPath = path.join(projectPath, "e2e-tests/.env.testing");
     let authStrategy: AuthStrategy = "email-password";
     if (fs.existsSync(envPath)) {
-      const envVars = this.parseEnvFile(envPath);
+      const envVars = parseEnvFile(envPath);
       if (envVars.AUTH_STRATEGY) {
         authStrategy = envVars.AUTH_STRATEGY as AuthStrategy;
       }
@@ -757,18 +629,7 @@ export class ProjectService {
    * Returns null if the skill is not found (caller falls back to orchestrator prompt).
    */
   loadSkillPrompt(projectPath: string, skillName: string): string | null {
-    const skillPaths = [
-      path.join(projectPath, `.claude/skills/${skillName}/SKILL.md`),
-      path.join(projectPath, `.claude_skills/${skillName}/SKILL.md`),
-    ];
-    for (const p of skillPaths) {
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, "utf-8");
-        const body = raw.replace(/^---[\s\S]*?---\n?/, "").trim();
-        return `You are running inside Specwright, an E2E test automation desktop app.\n\n${body}`;
-      }
-    }
-    return null;
+    return loadSkillPrompt(projectPath, skillName);
   }
 
   /**
@@ -780,76 +641,7 @@ export class ProjectService {
    *   4. Fallback
    */
   loadOrchestratorPrompt(projectPath?: string): string {
-    if (projectPath) {
-      // Priority 1: The e2e-automate skill IS the orchestrator
-      const skillPaths = [
-        path.join(projectPath, ".claude/skills/e2e-automate/SKILL.md"),
-        path.join(projectPath, ".claude_skills/e2e-automate/SKILL.md"),
-      ];
-      for (const p of skillPaths) {
-        if (fs.existsSync(p)) {
-          const skillDir = path.dirname(p);
-          const projectSkillsDir = path.dirname(skillDir);
-          const raw = fs.readFileSync(p, "utf-8");
-          const body = raw.replace(/^---[\s\S]*?---\n?/, "").trim();
-
-          // Inline all other skills from the project's skills directory.
-          // In the Desktop app context, context:fork sub-skill invocations don't work
-          // (Agent SDK subprocess can't fork). Inline every skill so Claude follows
-          // them directly — no Skill tool needed.
-          const inlinedSubSkills: string[] = [];
-          if (fs.existsSync(projectSkillsDir)) {
-            const entries = fs.readdirSync(projectSkillsDir, { withFileTypes: true });
-            for (const entry of entries) {
-              if (!entry.isDirectory() || entry.name === "e2e-automate") continue;
-              const subPath = path.join(projectSkillsDir, entry.name, "SKILL.md");
-              if (fs.existsSync(subPath)) {
-                const subRaw = fs.readFileSync(subPath, "utf-8");
-                const subBody = subRaw.replace(/^---[\s\S]*?---\n?/, "").trim();
-                inlinedSubSkills.push(`### /${entry.name}\n\n${subBody}`);
-              }
-            }
-          }
-
-          // Also inline agents from .claude/agents/ so @agent-name references work inline.
-          const agentsDir = path.join(projectPath, ".claude/agents");
-          if (fs.existsSync(agentsDir)) {
-            const agentEntries = fs.readdirSync(agentsDir, { withFileTypes: true });
-            for (const entry of agentEntries) {
-              if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-              const agentPath = path.join(agentsDir, entry.name);
-              const agentRaw = fs.readFileSync(agentPath, "utf-8");
-              const agentBody = agentRaw.replace(/^---[\s\S]*?---\n?/, "").trim();
-              const agentName = entry.name.replace(".md", "");
-              inlinedSubSkills.push(`### @${agentName}\n\n${agentBody}`);
-            }
-          }
-
-          const subSkillSection = inlinedSubSkills.length > 0
-            ? `\n\n---\n\n## Sub-Skill & Agent Reference (Inline)\n\n` +
-              `When pipeline phases instruct you to invoke a sub-skill (/e2e-process, /e2e-plan, etc.) or an agent (@explorer, etc.), ` +
-              `execute the matching instructions below directly — do NOT use the Skill or Agent tool in this environment.\n\n` +
-              inlinedSubSkills.join("\n\n---\n\n")
-            : "";
-
-          return `You are running inside Specwright, an E2E test automation desktop app. The user has configured test instructions via the UI. Execute the pipeline below.\n\n${body}${subSkillSection}`;
-        }
-      }
-
-      // Priority 2: Agent file
-      const agentPaths = [
-        path.join(projectPath, ".claude/agents/orchestrator.md"),
-        path.join(projectPath, ".claude_agents/orchestrator.md"),
-      ];
-      for (const p of agentPaths) {
-        if (fs.existsSync(p)) {
-          const raw = fs.readFileSync(p, "utf-8");
-          return raw.replace(/^---[\s\S]*?---\n?/, "").trim();
-        }
-      }
-    }
-
-    return "You are a helpful test automation assistant. Read e2e-tests/instructions.js and execute the E2E test automation pipeline.";
+    return loadOrchestratorPrompt(projectPath);
   }
 
   // ── Scaffold templates ─────────────────────────────────────────────────────
