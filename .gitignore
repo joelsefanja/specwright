@@ -35,7 +35,6 @@ packages/mcp-server/package-lock.json
 coverage/
 
 # Internal tooling & planning docs (not for repo)
-.claude/
 .changeset/
 .codegraph/
 .code-review-graph/
@@ -43,3 +42,22 @@ AGENTS.md
 IMPLEMENTATION-PLAN.md
 NEXT-PHASE.md
 *.bak
+
+.bootstrapping
+.specwright/*
+!.specwright/.gitkeep
+.claude/settings.local.json
+.claude/agent-memory/
+.features-gen/
+e2e-tests/playwright/auth-storage/.auth/user.json
+e2e-tests/playwright/test-data/*.json
+e2e-tests/playwright/test-data/**/*.json
+.playwright-mcp/
+reports/cucumber-bdd/*
+reports/playwright/*
+reports/json/*
+reports/screenshots/*
+reports/coverage/*
+.raw-coverage/
+test-results/*
+!test-results/.gitkeep
