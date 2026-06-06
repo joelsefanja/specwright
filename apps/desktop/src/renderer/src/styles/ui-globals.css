@@ -318,7 +318,7 @@ textarea.operator-field,
   grid-template-columns: repeat(12, minmax(0, 1fr));
   grid-template-rows: auto;
   gap: var(--sw-space-2);
-  padding-bottom: calc(128px * var(--sw-ui-scale));
+  padding-bottom: calc(104px * var(--sw-ui-scale));
 }
 
 .operator-studio-frame-inner > * {
@@ -362,7 +362,7 @@ textarea.operator-field,
 .operator-studio-content {
   display: grid;
   align-content: start;
-  gap: var(--sw-space-4);
+  gap: var(--sw-space-3);
   padding-bottom: var(--sw-space-3);
 }
 
@@ -487,13 +487,30 @@ textarea.operator-field,
 }
 
 .operator-recent-projects-panel {
-  padding-top: var(--sw-space-4);
+  padding-top: var(--sw-space-3);
 }
 
 .operator-recent-projects-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--sw-space-2);
+}
+
+.operator-recent-empty-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sw-space-2);
+  border: var(--sw-border-width) dashed var(--sw-line);
+  border-radius: var(--sw-radius-card-compact);
+  padding: var(--sw-space-3);
+  color: var(--sw-text-muted);
+  font-size: var(--sw-font-size-small);
+}
+
+.operator-recent-empty-state p {
+  margin: 0;
 }
 
 .operator-recent-project-button {

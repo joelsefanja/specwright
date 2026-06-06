@@ -39,9 +39,7 @@ export function WorkflowShell({ children }: WorkflowShellProps): React.JSX.Eleme
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-operator-canvas">
       <WorkflowCoach
-        activeStep={workflow.activeStep}
         steps={workflow.steps}
-        summary={workflow.summary}
         canGoBack={workflow.canGoBack}
         canGoForward={workflow.canGoForward}
         onBack={workflow.goBack}

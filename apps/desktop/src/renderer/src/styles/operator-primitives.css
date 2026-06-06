@@ -5,7 +5,7 @@
 
 @media (min-width: 900px) {
   .operator-agent-main-grid {
-      grid-template-columns: minmax(220px, .75fr) minmax(0, 1.25fr);
+      grid-template-columns: minmax(220px, .6fr) minmax(0, 1.4fr);
     }
 }
 

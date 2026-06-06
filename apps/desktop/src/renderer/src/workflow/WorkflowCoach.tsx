@@ -1,13 +1,12 @@
 import React from "react";
 import { CheckCircle, Circle, LockKey, PlayCircle, WarningCircle } from "@phosphor-icons/react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { useTranslations } from "../i18n/localeStore";
 import type { WorkflowStepViewModel } from "./workflowState";
 import type { WorkflowStepId } from "./workflowSteps";
 
 interface WorkflowCoachProps {
-  activeStep: WorkflowStepViewModel;
   steps: WorkflowStepViewModel[];
-  summary: string;
   canGoBack: boolean;
   canGoForward: boolean;
   onBack: () => void;
@@ -95,28 +94,45 @@ export function WorkflowCoach({ steps, canGoBack, canGoForward, onBack, onForwar
               const stepTitle = text.workflow.steps[step.id].title;
               const visibleStepTitle = text.workflow.steps[step.id].shortTitle || stepTitle;
               const lockedStepHelp = step.status === "running" ? text.workflow.lockedReasons.running : text.workflow.lockedReasons[step.id] ?? text.coach.lockedStep;
+              const tooltipContent = step.canNavigate ? `${text.coach.goToStep}: ${stepTitle}` : lockedStepHelp;
               return (
-            <button
-              type="button"
-              data-step-id={step.id}
-              data-step-status={step.status}
-              data-workflow-step-button={step.status === "active" || step.status === "running" ? "active" : "true"}
-              className={`${stepClassName(step.status)} relative h-full w-full disabled:cursor-not-allowed disabled:opacity-60`}
-              disabled={!step.canNavigate}
-              title={step.canNavigate ? `${text.coach.goToStep}: ${stepTitle}` : lockedStepHelp}
-              onClick={() => onSelectStep(step.id)}
-            >
-              {(step.status === "active" || step.status === "running") && (
-                <span className="operator-workflow-active-frame" />
-              )}
-              <span className="operator-step-title relative z-10 min-w-0">
-                <span className="operator-step-number">{String(step.number).padStart(2, "0")}</span>
-                <span className="operator-step-copy">{visibleStepTitle}</span>
-                <span className="operator-step-status-icon" data-status={step.status} aria-hidden="true">
-                  <StepStatusIcon status={step.status} />
-                </span>
-              </span>
-            </button>
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <button
+                  type="button"
+                  data-step-id={step.id}
+                  data-step-status={step.status}
+                  data-workflow-step-button={step.status === "active" || step.status === "running" ? "active" : "true"}
+                  data-testid={`workflow-step-${step.id}`}
+                  className={`${stepClassName(step.status)} relative h-full w-full disabled:cursor-not-allowed disabled:opacity-60`}
+                  disabled={!step.canNavigate}
+                  onClick={() => onSelectStep(step.id)}
+                >
+                  {(step.status === "active" || step.status === "running") && (
+                    <span className="operator-workflow-active-frame" />
+                  )}
+                  <span className="operator-step-title relative z-10 min-w-0">
+                    <span className="operator-step-number">{String(step.number).padStart(2, "0")}</span>
+                    <span className="operator-step-copy">{visibleStepTitle}</span>
+                    <span className="operator-step-status-icon" data-status={step.status} aria-hidden="true">
+                      <StepStatusIcon status={step.status} />
+                    </span>
+                  </span>
+                </button>
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Content
+                  side="bottom"
+                  align="center"
+                  sideOffset={6}
+                  data-testid={`workflow-tooltip-${step.id}`}
+                  className="z-[999] rounded-md bg-[var(--sw-bg)] px-3 py-1.5 text-xs leading-snug text-[var(--sw-text)] shadow-lg ring-1 ring-[var(--sw-line)]"
+                >
+                  {tooltipContent}
+                  <Tooltip.Arrow className="fill-[var(--sw-bg)]" />
+                </Tooltip.Content>
+              </Tooltip.Portal>
+            </Tooltip.Root>
               );
             })()}
           </li>
