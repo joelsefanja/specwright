@@ -24,7 +24,7 @@ interface StudioStepProps {
 
 export function StudioStep({ stepId, stepLabel, title, description, children, actionBar, width = "standard" }: StudioStepProps): React.JSX.Element {
   return (
-    <section className="operator-workflow-frame operator-studio-frame">
+    <section className="operator-workflow-frame operator-studio-frame" data-testid={`step-${stepId}`}>
       <div className="operator-workflow-frame-inner operator-studio-frame-inner" data-width={width} data-step={stepId}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -37,36 +37,30 @@ export function StudioStep({ stepId, stepLabel, title, description, children, ac
             transition={workflowStepTransition}
           >
             <header className="operator-studio-header" data-step={stepId}>
-              <p className="operator-studio-step-label">{formatStepLabel(stepId, stepLabel)}</p>
-              <h1 className="operator-studio-title">{title}</h1>
+              <h1 className="operator-studio-title" data-testid="step-heading">{title}</h1>
               <p className="operator-studio-description">{description}</p>
             </header>
             <div className="operator-studio-content">
               {children}
             </div>
-            <WorkflowActionBar {...actionBar} />
           </motion.div>
         </AnimatePresence>
+        <WorkflowActionBar {...actionBar} />
       </div>
     </section>
   );
-}
-
-function formatStepLabel(stepId: WorkflowStepId, fallback: string): string {
-  const labels: Record<WorkflowStepId, string> = {
-    "connect-project": "01 / Project",
-    "configure-access": "02 / Access",
-    "describe-test": "03 / Process",
-    "run-tests": "04 / Review",
-  };
-  return labels[stepId] ?? fallback;
 }
 
 export function WorkflowActionBar({ primary, secondary, helper, title }: StudioActionBarProps): React.JSX.Element {
   if (!primary && !secondary) return <></>;
 
   return (
-    <footer className="operator-studio-action-bar">
+    <motion.footer
+      className="operator-studio-action-bar"
+      data-testid="workflow-action-bar"
+      layout
+      transition={{ layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+    >
       <div className="operator-studio-action-helper">
         {title && <span className="operator-studio-action-title">{title}</span>}
         {helper && <span className="operator-studio-action-copy">{helper}</span>}
@@ -75,7 +69,7 @@ export function WorkflowActionBar({ primary, secondary, helper, title }: StudioA
         {secondary}
         {primary}
       </div>
-    </footer>
+    </motion.footer>
   );
 }
 

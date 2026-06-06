@@ -4,7 +4,7 @@ import { Button } from "../../components/ui";
 import { AuthSettingsModal } from "../../components/LeftPanel/AuthSettingsModal";
 import { ThemeSelect } from "../../components/LeftPanel/ThemeSelect";
 import type { WorkflowStepId } from "../workflowSteps";
-import { AccessStepCard, AccessSummaryPanel, AdvancedSettingsModal } from "./configure-access";
+import { AccessStepCard, AdvancedSettingsModal } from "./configure-access";
 import { useConfigureAccessStep } from "./configure-access/useConfigureAccessStep";
 import { StudioStep } from "./StudioStep";
 
@@ -111,9 +111,23 @@ export function ConfigureAccessStep({ onSelectStep }: { onSelectStep: (stepId: W
 
         </div>
 
-        <aside className="operator-access-summary">
-          <AccessSummaryPanel accessReady={accessReady} appUrlConfigured={appUrlConfigured} friendlyText={friendlyText} items={accessItems} onNext={() => onSelectStep("describe-test")} showAction={false} />
-          <button type="button" className="operator-access-preferences-card" onClick={() => setAdvancedOpen(true)}>
+        <aside className="operator-access-summary operator-access-side-panel">
+          <div className="operator-access-checklist" data-ready={accessReady} data-testid="access-checklist">
+            <p className="operator-access-summary-kicker">{friendlyText.nextReadyKicker}</p>
+            <h3 className="operator-access-summary-heading">{accessReady ? friendlyText.readyTitle : friendlyText.notReadyTitle}</h3>
+            <div className="operator-access-checklist-items">
+              {accessItems.map((item) => (
+                <button key={item.label} type="button" className="operator-access-checklist-item" data-ready={item.ready} onClick={item.action} disabled={!item.action}>
+                  <span className="operator-access-check-dot" />
+                  <span>
+                    <strong>{item.label}</strong>
+                    <small>{item.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <button type="button" className="operator-access-preferences-card" data-testid="advanced-settings" onClick={() => setAdvancedOpen(true)}>
             <span className="operator-access-preferences-icon"><GearSix size={16} weight="duotone" /></span>
             <span>
               <strong>{advancedText.openButton}</strong>

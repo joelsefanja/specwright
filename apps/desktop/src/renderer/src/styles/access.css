@@ -155,11 +155,85 @@
   align-content: start;
 }
 
+.operator-access-side-panel {
+  gap: var(--sw-space-3);
+}
+
 @media (min-width: 960px) {
   .operator-access-summary {
     position: sticky;
     top: var(--sw-space-4);
   }
+}
+
+.operator-access-checklist {
+  display: grid;
+  gap: var(--sw-space-3);
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 78%, transparent);
+  border-radius: var(--sw-radius-card);
+  background: color-mix(in srgb, var(--sw-surface) 62%, transparent);
+  padding: var(--sw-space-4);
+}
+
+.operator-access-checklist[data-ready="true"] {
+  border-color: color-mix(in srgb, var(--sw-success) 22%, var(--sw-line));
+  background: color-mix(in srgb, var(--sw-success) 5%, var(--sw-surface));
+}
+
+.operator-access-checklist-items {
+  display: grid;
+  gap: var(--sw-space-2);
+}
+
+.operator-access-checklist-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sw-space-2);
+  width: 100%;
+  border: var(--sw-border-width) solid var(--sw-line);
+  border-radius: var(--sw-radius-control);
+  background: color-mix(in srgb, var(--sw-field) 52%, transparent);
+  padding: var(--sw-space-2) var(--sw-space-3);
+  color: var(--sw-text);
+  text-align: left;
+}
+
+.operator-access-checklist-item:disabled {
+  cursor: default;
+}
+
+.operator-access-checklist-item strong,
+.operator-access-checklist-item small {
+  display: block;
+  min-width: 0;
+}
+
+.operator-access-checklist-item strong {
+  font-size: var(--sw-font-size-small);
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.operator-access-checklist-item small {
+  margin-top: calc(var(--sw-space-1) * 0.5);
+  color: var(--sw-text-muted);
+  font-size: var(--sw-font-size-small);
+  line-height: 1.25;
+}
+
+.operator-access-check-dot {
+  width: calc(18px * var(--sw-ui-scale));
+  height: calc(18px * var(--sw-ui-scale));
+  border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-warning) 38%, var(--sw-line));
+  border-radius: var(--sw-radius-pill);
+  background: color-mix(in srgb, var(--sw-warning) 8%, var(--sw-surface));
+}
+
+.operator-access-checklist-item[data-ready="true"] .operator-access-check-dot {
+  border-color: color-mix(in srgb, var(--sw-success) 70%, var(--sw-line));
+  background: color-mix(in srgb, var(--sw-success) 82%, var(--sw-surface));
+  box-shadow: inset 0 0 0 calc(4px * var(--sw-ui-scale)) var(--sw-surface);
 }
 
 .operator-access-summary-card {

@@ -531,15 +531,15 @@ export default function InstructionCard({ card, index }: Props): React.JSX.Eleme
                   rows={2}
                 />
               </div>
-              {card.steps.length > 1 && (
-                <button
-                  onClick={() => removeStep(card.id, i)}
-                  className="operator-button operator-step-remove gap-1 px-2 py-1 text-xs flex-shrink-0"
-                >
-                  <X size={12} weight="bold" />
-                  {copy.removeStep}
-                </button>
-              )}
+              <button
+                onClick={() => removeStep(card.id, i)}
+                className="operator-button operator-step-remove gap-1 px-2 py-1 text-xs flex-shrink-0"
+                data-testid={`remove-step-${i}`}
+                aria-label={`${copy.removeStep} ${i + 1}`}
+              >
+                <X size={12} weight="bold" />
+                {copy.removeStep}
+              </button>
             </div>
           ))}
         </div>

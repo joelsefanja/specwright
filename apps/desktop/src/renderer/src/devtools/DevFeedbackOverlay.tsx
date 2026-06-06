@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Browsers, CaretDown, ChatCircleText, CheckCircle, Copy, CursorClick, PaperPlaneTilt, Stop, TerminalWindow, WarningCircle, X } from "@phosphor-icons/react";
+import { Browsers, CaretDown, ChatCircleText, CheckCircle, Copy, CursorClick, MagicWand, PaperPlaneTilt, Stop, TerminalWindow, WarningCircle, X } from "@phosphor-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { StatusPill, type StatusPillProps } from "../components/ui";
 import { useTranslations } from "../i18n/localeStore";
@@ -42,6 +42,7 @@ interface FeedbackJob {
 }
 
 type ContextScope = "element" | "page";
+type MagicWrightPreset = "selected-copy" | "page-copy" | "buttons-labels";
 
 interface PersistedFeedbackState {
   jobs: FeedbackJob[];
@@ -64,6 +65,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
   const [jobs, setJobs] = useState<FeedbackJob[]>([]);
   const [focusedJobId, setFocusedJobId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [isMagicWright, setIsMagicWright] = useState(false);
   const draftOutputRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -176,8 +178,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
     return buildPrompt(dialog.context, comment, contextScope);
   }, [comment, contextScope, dialog]);
   const runningCount = jobs.filter((job) => job.status === "running").length;
-  const menuLeft = menu ? Math.min(menu.x, Math.max(12, window.innerWidth - 380)) : 0;
-  const menuTop = menu ? Math.min(menu.y, Math.max(12, window.innerHeight - 188)) : 0;
+  const menuPosition = menu ? getAnchoredMenuPosition(menu.context.captureRect) : { left: 0, top: 0, placement: "below" as const };
 
   if (!import.meta.env.DEV && !window.specwright.devFeedback?.isE2E) return null;
 
@@ -187,9 +188,33 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
     setDialog(menu);
     setComment("");
     setContextScope("element");
+    setIsMagicWright(false);
     setCopied(false);
     setSelectionHighlight(null);
     setMenu(null);
+  };
+
+  const openMagicWright = async (preset: MagicWrightPreset): Promise<void> => {
+    if (!menu) return;
+    const nextDialog = menu;
+    setFocusedJobId(null);
+    setDialog(nextDialog);
+    setComment(buildMagicWrightComment(preset, isEnglish, nextDialog.context));
+    setContextScope("page");
+    setIsMagicWright(true);
+    setCopied(false);
+    setSelectionHighlight(null);
+    setMenu(null);
+    const screenshot = await capturePageScreenshot();
+    if (screenshot) setDialog((current) => current ? { ...current, screenshot } : current);
+  };
+
+  const closeDialog = (): void => {
+    setDialog(null);
+    setFocusedJobId(null);
+    setSelectionHighlight(null);
+    setIsMagicWright(false);
+    if (runningCount > 0) setNotice(text.close === "Close" ? "The improvement continues in the bottom-right panel." : "De verbetering loopt rechtsonder verder.");
   };
 
   const copyPrompt = async (): Promise<void> => {
@@ -267,6 +292,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
   const continueJob = (job: FeedbackJob, nextComment: string): void => {
     setDialog({ x: 0, y: 0, context: job.context, screenshot: job.afterImage ?? job.beforeImage });
     setComment(`${job.comment}\n\nVervolg:\n${nextComment}`);
+    setIsMagicWright(false);
     setContextScope(job.contextScope ?? "page");
     setCopied(false);
     setFocusedJobId(null);
@@ -302,6 +328,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
   };
 
   const retryJob = (job: FeedbackJob): void => {
+    setIsMagicWright(false);
     setCopied(false);
     setFocusedJobId(null);
     void startFeedbackJob({
@@ -314,10 +341,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
   };
 
   const sendToBackground = (): void => {
-    setDialog(null);
-    setFocusedJobId(null);
-    setSelectionHighlight(null);
-    if (runningCount > 0) setNotice(text.close === "Close" ? "The improvement continues in the bottom-right panel." : "De verbetering loopt rechtsonder verder.");
+    closeDialog();
   };
 
   return (
@@ -326,14 +350,16 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
       {menu && (
         <motion.div
           className="operator-feedback-context-menu"
-          style={{ left: menuLeft, top: menuTop }}
+          data-testid="feedback-context-menu"
+          data-placement={menuPosition.placement}
+          style={{ left: menuPosition.left, top: menuPosition.top }}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 4 }}
           transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button type="button" className="operator-feedback-context-action" onClick={() => void openDialog()}>
+          <button type="button" className="operator-feedback-context-action" data-testid="design-feedback-button" onClick={() => void openDialog()}>
             <span className="operator-feedback-context-icon"><ChatCircleText size={20} weight="duotone" /></span>
             <span className="min-w-0">
               <span className="operator-feedback-context-kicker">{text.close === "Close" ? "Design feedback" : "Ontwerp-feedback"}</span>
@@ -342,6 +368,23 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
               <span className="operator-feedback-context-target">{describeElement(menu.context, text)}</span>
             </span>
           </button>
+          <div className="operator-magic-wright-panel" data-testid="magic-wright-panel">
+            <div className="operator-magic-wright-head">
+              <span className="operator-feedback-context-icon operator-magic-wright-icon"><MagicWand size={18} weight="duotone" /></span>
+              <span>
+                <span className="operator-feedback-context-kicker">Magic Wright</span>
+                <span className="operator-feedback-context-copy">{isEnglish ? "Use the whole page and UX writing best practices." : "Gebruikt de hele pagina en UX-writing best practices."}</span>
+              </span>
+            </div>
+            <div className="operator-magic-wright-options">
+              {magicWrightOptions(isEnglish).map((option) => (
+                <button key={option.preset} type="button" data-testid={`magic-wright-${option.preset}`} onClick={() => void openMagicWright(option.preset)}>
+                  <strong>{option.label}</strong>
+                  <small>{option.description}</small>
+                </button>
+              ))}
+            </div>
+          </div>
         </motion.div>
       )}
 
@@ -361,6 +404,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
               className="operator-panel operator-feedback-dialog pointer-events-auto border shadow-2xl"
               role="dialog"
               aria-modal="true"
+              data-testid="feedback-dialog"
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 4 }}
@@ -373,7 +417,7 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
                   <h2 className="text-sm font-semibold text-operator-ink">{isEnglish ? "Improve this UI" : "Verbeter deze UI"}</h2>
                 </div>
                 <div>
-                  <button type="button" className="operator-icon-button" onClick={sendToBackground} aria-label={text.close}>
+                  <button type="button" className="operator-icon-button" data-testid="dialog-close" onClick={sendToBackground} aria-label={text.close}>
                     <X size={15} weight="bold" />
                   </button>
                 </div>
@@ -384,35 +428,38 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
               ) : dialog ? (
                 <div className="operator-feedback-body operator-feedback-compose-body flex flex-col gap-3 px-3 py-3">
                   <ElementDetails context={dialog.context} text={text} />
-                  {dialog.screenshot && (
-                    <details className="operator-feedback-preview-disclosure border border-operator-line bg-operator-panel px-3 py-2">
-                      <summary className="cursor-pointer text-xs font-semibold text-operator-muted">{contextScope === "page" ? (isEnglish ? "Before: whole page" : "Voor: hele pagina") : text.element}</summary>
-                      <div className="mt-3">
-                        <ScreenshotPreview title={contextScope === "page" ? (isEnglish ? "Whole page" : "Hele pagina") : text.element} src={dialog.screenshot} fallback={text.screenshotUnavailable} />
-                      </div>
-                    </details>
-                  )}
-                  <div className="operator-feedback-scope-grid grid gap-2 sm:grid-cols-2">
-                    <button type="button" className={contextScope === "element" ? "operator-feedback-scope operator-feedback-scope-active" : "operator-feedback-scope"} onClick={() => chooseContextScope("element")}>
-                      <CursorClick size={15} weight="bold" className="mt-0.5 flex-shrink-0" />
-                      <span>
-                        <span className="block font-semibold">{text.close === "Close" ? "Element only" : "Alleen element"}</span>
-                        <span className="block text-[11px] opacity-75">{text.close === "Close" ? "Screenshot of the selected element." : "Screenshot van het gekozen element."}</span>
-                      </span>
-                    </button>
-                    <button type="button" className={contextScope === "page" ? "operator-feedback-scope operator-feedback-scope-active" : "operator-feedback-scope"} onClick={() => chooseContextScope("page")}>
-                      <Browsers size={15} weight="bold" className="mt-0.5 flex-shrink-0" />
-                      <span>
-                        <span className="block font-semibold">{text.close === "Close" ? "Whole page" : "Hele pagina"}</span>
-                        <span className="block text-[11px] opacity-75">{text.close === "Close" ? "Full-screen screenshot plus page text." : "Volledig screenshot plus paginatekst."}</span>
-                      </span>
-                    </button>
+                  <div className="operator-feedback-preview-card">
+                    <ScreenshotPreview title={contextScope === "page" ? (isEnglish ? "Before: whole page" : "Voor: hele pagina") : text.element} src={dialog.screenshot} fallback={text.screenshotUnavailable} />
                   </div>
+                  {isMagicWright ? (
+                    <div className="operator-magic-wright-locked-context" data-testid="magic-wright-locked-context">
+                      <Browsers size={15} weight="bold" />
+                      <span>{isEnglish ? "Magic Wright always uses the whole page as context." : "Magic Wright gebruikt altijd de hele pagina als context."}</span>
+                    </div>
+                  ) : (
+                    <div className="operator-feedback-scope-grid grid gap-2 sm:grid-cols-2">
+                      <button type="button" className={contextScope === "element" ? "operator-feedback-scope operator-feedback-scope-active" : "operator-feedback-scope"} data-testid="scope-element" onClick={() => chooseContextScope("element")}>
+                        <CursorClick size={15} weight="bold" className="mt-0.5 flex-shrink-0" />
+                        <span>
+                          <span className="block font-semibold">{text.close === "Close" ? "Element only" : "Alleen element"}</span>
+                          <span className="block text-[11px] opacity-75">{text.close === "Close" ? "Screenshot of the selected element." : "Screenshot van het gekozen element."}</span>
+                        </span>
+                      </button>
+                      <button type="button" className={contextScope === "page" ? "operator-feedback-scope operator-feedback-scope-active" : "operator-feedback-scope"} data-testid="scope-page" onClick={() => chooseContextScope("page")}>
+                        <Browsers size={15} weight="bold" className="mt-0.5 flex-shrink-0" />
+                        <span>
+                          <span className="block font-semibold">{text.close === "Close" ? "Whole page" : "Hele pagina"}</span>
+                          <span className="block text-[11px] opacity-75">{text.close === "Close" ? "Full-screen screenshot plus page text." : "Volledig screenshot plus paginatekst."}</span>
+                        </span>
+                      </button>
+                    </div>
+                  )}
                   <div className="operator-feedback-request-field">
                     <label className="operator-control-label" htmlFor="operator-feedback-comment">{isEnglish ? "What should improve?" : "Wat moet beter?"}</label>
                     <textarea
                       id="operator-feedback-comment"
-                      className="operator-field min-h-28 w-full flex-1 resize-none px-3 py-2"
+                      className={isMagicWright ? "operator-field min-h-44 w-full resize-y px-3 py-2" : "operator-field min-h-28 w-full flex-1 resize-none px-3 py-2"}
+                      rows={isMagicWright ? 8 : undefined}
                       value={comment}
                       onChange={(event) => setComment(event.target.value)}
                       onKeyDown={onCommentKeyDown}
@@ -422,11 +469,11 @@ export function DevFeedbackOverlay(): React.JSX.Element | null {
                   <div className="operator-feedback-actions">
                     <p className="operator-field-help m-0">{comment.trim() ? (isEnglish ? "Ready to send to OpenCode." : "Klaar om naar OpenCode te sturen.") : feedbackCommentRequired}</p>
                     <div className="flex flex-wrap justify-end gap-2">
-                      <button type="button" className="operator-button gap-2" onClick={() => void copyPrompt()} disabled={!comment.trim()}>
+                      <button type="button" className="operator-button gap-2" data-testid="copy-prompt" onClick={() => void copyPrompt()} disabled={!comment.trim()}>
                         <Copy size={14} weight="bold" />
                         {copied ? text.copied : text.copyPrompt}
                       </button>
-                      <button type="button" className="operator-button-primary gap-2" onClick={() => void runAgent()} disabled={!comment.trim()}>
+                      <button type="button" className="operator-button-primary gap-2" data-testid="start-improvement" onClick={() => void runAgent()} disabled={!comment.trim()}>
                         <PaperPlaneTilt size={14} weight="bold" />
                         {text.close === "Close" ? "Start improvement" : "Verbetering starten"}
                       </button>
@@ -451,9 +498,9 @@ function FeedbackJobsPanel({ jobs, runningCount, text, onOpen, onCancel, onRetry
   if (jobs.length === 0) return null;
   const isEnglish = text.close === "Close";
   return (
-    <motion.aside className={isCollapsed ? "operator-feedback-jobs operator-feedback-jobs-collapsed operator-panel border shadow-2xl" : "operator-feedback-jobs operator-panel border shadow-2xl"} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.aside className={isCollapsed ? "operator-feedback-jobs operator-feedback-jobs-collapsed operator-panel border shadow-2xl" : "operator-feedback-jobs operator-panel border shadow-2xl"} data-testid="feedback-jobs-panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="operator-agent-panel-head">
-        <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => setIsCollapsed((value) => !value)}>
+        <button type="button" className="flex min-w-0 items-center gap-2 text-left" data-testid="jobs-toggle" onClick={() => setIsCollapsed((value) => !value)}>
           <CaretDown size={13} weight="bold" className={isCollapsed ? "-rotate-90 transition" : "transition"} />
           <span className="operator-agent-mark"><TerminalWindow size={14} weight="duotone" /></span>
           <span className="min-w-0">
@@ -469,9 +516,9 @@ function FeedbackJobsPanel({ jobs, runningCount, text, onOpen, onCancel, onRetry
       {isCollapsed ? null : (
       <div className="operator-feedback-jobs-list space-y-2 overflow-auto p-3">
         {jobs.map((job) => (
-          <div key={job.id} className="operator-agent-run-card">
+          <div key={job.id} className="operator-agent-run-card" data-testid="agent-run-card">
             <span className="flex items-center justify-between gap-2">
-              <button type="button" className="min-w-0 truncate text-left text-sm font-medium text-operator-ink" onClick={() => onOpen(job.id)}>{describeElement(job.context, text)}</button>
+              <button type="button" className="min-w-0 truncate text-left text-sm font-medium text-operator-ink" data-testid="job-title" onClick={() => onOpen(job.id)}>{describeElement(job.context, text)}</button>
               <StatusPill status={statusPillTone(job.status)} size="xs">{statusLabel(job.status, text)}</StatusPill>
             </span>
             <button type="button" className="mt-1 block max-w-full truncate text-left text-xs text-operator-muted" onClick={() => onOpen(job.id)}>{job.comment || (isEnglish ? "No written request" : "Geen geschreven vraag")}</button>
@@ -656,6 +703,7 @@ function SelectionHighlightOverlay({ highlight }: { highlight: HighlightState })
     <div
       className="operator-feedback-selection-outline"
       data-mode={highlight.mode}
+      data-testid="selection-outline"
       style={{
         left: highlight.rect.x,
         top: highlight.rect.y,
@@ -664,6 +712,74 @@ function SelectionHighlightOverlay({ highlight }: { highlight: HighlightState })
       }}
     />
   );
+}
+
+function getAnchoredMenuPosition(rect: HighlightState["rect"]): { left: number; top: number; placement: "above" | "below" } {
+  const gutter = 12;
+  const gap = 10;
+  const estimatedWidth = Math.min(window.innerWidth - gutter * 2, 420 * getUiScale());
+  const estimatedHeight = 390 * getUiScale();
+  const left = clamp(rect.x + rect.width / 2 - estimatedWidth / 2, gutter, window.innerWidth - estimatedWidth - gutter);
+  const canPlaceAbove = rect.y - estimatedHeight - gap > gutter;
+  const top = canPlaceAbove
+    ? rect.y - estimatedHeight - gap
+    : Math.min(rect.y + rect.height + gap, window.innerHeight - estimatedHeight - gutter);
+  return { left, top: Math.max(gutter, top), placement: canPlaceAbove ? "above" : "below" };
+}
+
+function magicWrightOptions(isEnglish: boolean): Array<{ preset: MagicWrightPreset; label: string; description: string }> {
+  return isEnglish ? [
+    { preset: "selected-copy", label: "Improve selected copy", description: "Rewrite this area in context." },
+    { preset: "page-copy", label: "Improve page text", description: "Make the whole screen clearer." },
+    { preset: "buttons-labels", label: "Improve actions", description: "Sharpen buttons, labels, and help text." },
+  ] : [
+    { preset: "selected-copy", label: "Verbeter deze tekst", description: "Herschrijf dit onderdeel in context." },
+    { preset: "page-copy", label: "Verbeter paginacopy", description: "Maak het hele scherm duidelijker." },
+    { preset: "buttons-labels", label: "Verbeter acties", description: "Verscherp knoppen, labels en helptekst." },
+  ];
+}
+
+function buildMagicWrightComment(preset: MagicWrightPreset, isEnglish: boolean, context: ElementContext): string {
+  const target = describeElement(context);
+  const visibleText = context.text.trim() || (isEnglish ? "No readable selected text" : "Geen leesbare geselecteerde tekst");
+
+  const commonEnglish = [
+    "Magic Wright: improve UI copy using the whole page as context.",
+    "Apply UX writing best practices: clear, human, action-oriented, consistent terms, no jargon, short button labels, helpful help text.",
+    `Selected area: ${target}`,
+    `Visible selected text: ${visibleText}`,
+  ];
+  const commonDutch = [
+    "Magic Wright: verbeter UI-copy met de hele pagina als context.",
+    "Gebruik UX-writing best practices: helder, menselijk, actiegericht, consistente termen, geen jargon, korte knoplabels en nuttige helptekst.",
+    `Gekozen onderdeel: ${target}`,
+    `Zichtbare geselecteerde tekst: ${visibleText}`,
+  ];
+
+  const instruction = isEnglish ? magicWrightInstructionEn(preset) : magicWrightInstructionNl(preset);
+  return [...(isEnglish ? commonEnglish : commonDutch), instruction].join("\n");
+}
+
+function magicWrightInstructionEn(preset: MagicWrightPreset): string {
+  if (preset === "selected-copy") return "Focus on rewriting the selected element copy, but keep it consistent with the rest of the page.";
+  if (preset === "buttons-labels") return "Focus on buttons, labels, placeholders, helper text, empty states, and action wording across the page.";
+  return "Review and improve all visible copy on the page so the flow feels logical and easy to understand.";
+}
+
+function magicWrightInstructionNl(preset: MagicWrightPreset): string {
+  if (preset === "selected-copy") return "Focus op het herschrijven van de geselecteerde tekst, maar houd die consistent met de rest van de pagina.";
+  if (preset === "buttons-labels") return "Focus op knoppen, labels, placeholders, helptekst, lege states en actieteksten op de hele pagina.";
+  return "Bekijk en verbeter alle zichtbare copy op de pagina zodat de flow logisch en makkelijk te begrijpen voelt.";
+}
+
+function getUiScale(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--sw-ui-scale").trim();
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
 function ScreenshotPreview({ title, src, fallback }: { title: string; src: string | null; fallback: string }): React.JSX.Element {

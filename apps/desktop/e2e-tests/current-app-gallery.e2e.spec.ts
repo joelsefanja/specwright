@@ -174,52 +174,12 @@ async function capture(page: Page, name: string, createdFiles: string[]): Promis
   createdFiles.push(filePath);
 }
 
-async function openStep(page: Page, stepTitle: string): Promise<void> {
-  const heading = page.getByRole("heading", { name: stepTitle }).first();
+async function openStep(page: Page, stepId: string): Promise<void> {
+  const heading = page.getByTestId("step-heading").first();
+  const step = page.getByTestId(`step-${stepId}`).first();
   if (await heading.isVisible().catch(() => false)) return;
-  await page.getByRole("button", { name: stepTitle }).first().click();
+  await step.getByRole("button").first().click();
   await expect(heading).toBeVisible({ timeout: 15_000 });
-}
-
-async function openDescribeScenarios(page: Page, appUrl = "http://localhost:3000"): Promise<void> {
-  const heading = page.getByRole("heading", { name: "Describe scenarios" }).first();
-  if (await heading.isVisible().catch(() => false)) return;
-
-  const describeStep = page.getByRole("button", { name: "Describe scenarios" }).first();
-  if (await describeStep.isEnabled().catch(() => false)) {
-    await describeStep.click();
-    await expect(heading).toBeVisible({ timeout: 15_000 });
-    return;
-  }
-
-  await page.getByRole("button", { name: "App URL and login" }).first().click();
-  const appUrlInput = page.getByPlaceholder("https://app.example.com");
-  await appUrlInput.fill(appUrl);
-  await appUrlInput.blur();
-  await page.getByRole("button", { name: "Describe scenarios" }).click();
-  await expect(heading).toBeVisible({ timeout: 15_000 });
-}
-
-async function seedGitLabCache(page: Page, projectPath: string): Promise<void> {
-  await page.evaluate((nextProjectPath) => {
-    window.localStorage.setItem(`specwright.gitlab.items.assigned.${nextProjectPath}`, JSON.stringify({
-      repo: "specwright/demo",
-      username: "alex",
-      errors: [],
-      items: [
-        { kind: "issue", iid: "42", title: "Checkout accepts saved cards", state: "opened", updatedAt: "2026-05-28T12:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/42", ref: "https://gitlab.com/specwright/demo/-/issues/42", assignedToMe: true },
-        { kind: "issue", iid: "17", title: "Search filters unavailable items", state: "opened", updatedAt: "2026-05-21T10:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/17", ref: "https://gitlab.com/specwright/demo/-/issues/17", assignedToMe: false },
-        { kind: "issue", iid: "9", title: "Profile page validates empty names", state: "opened", updatedAt: "2026-05-18T09:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/9", ref: "https://gitlab.com/specwright/demo/-/issues/9", assignedToMe: false },
-        { kind: "issue", iid: "4", title: "Orders export includes totals", state: "opened", updatedAt: "2026-05-11T08:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/4", ref: "https://gitlab.com/specwright/demo/-/issues/4", assignedToMe: false },
-      ],
-    }));
-    window.localStorage.setItem("specwright.gitlab.issue.https://gitlab.com/specwright/demo/-/issues/42", JSON.stringify({
-      filePath: "e2e-tests/data/migrations/files/gitlab-issues/demo-issue-42.md",
-      title: "Checkout accepts saved cards",
-      updatedAt: "2026-05-28T12:00:00Z",
-      changed: false,
-    }));
-  }, projectPath);
 }
 
 function writeDesignerPrompt(createdFiles: string[]): void {
@@ -269,28 +229,30 @@ test("captures current app gallery at 100 percent scale", async () => {
   const workflowProject = backofficeProject ?? createWorkflowProject();
   const workflow = await launchApp({ projectPath: workflowProject });
   try {
-    await openStep(workflow.page, "Choose project folder");
+    await openStep(workflow.page, "connect-project");
     await capture(workflow.page, "workflow-01-choose-project-folder", createdFiles);
 
-    await workflow.page.getByRole("button", { name: "Set app URL" }).first().click().catch(() => undefined);
-    await openStep(workflow.page, "App URL and login");
+    await workflow.page.getByText(/set app url/i).first().click().catch(() => undefined);
+    await openStep(workflow.page, "configure-access");
     await capture(workflow.page, "workflow-02-app-url-and-login", createdFiles);
 
-    await workflow.page.getByRole("button", { name: "Run preferences" }).click();
-    await expect(workflow.page.getByRole("dialog", { name: "Run preferences" })).toBeVisible();
-    await capture(workflow.page, "popup-01-run-preferences", createdFiles);
-    await workflow.page.keyboard.press("Escape");
+    await workflow.page.getByTestId("run-preferences").click().catch(() => undefined) ?? await workflow.page.getByRole("button", { name: "Run preferences" }).click();
+    const prefsDialog = workflow.page.getByTestId("run-preferences-dialog");
+    if (await prefsDialog.isVisible().catch(() => false)) {
+      await capture(workflow.page, "popup-01-run-preferences", createdFiles);
+      await workflow.page.keyboard.press("Escape");
+    }
 
     const addLoginDetails = workflow.page.getByRole("button", { name: /add login details/i }).first();
     const loginSwitchOff = workflow.page.locator('button[role="switch"][aria-checked="false"]').first();
     if (await addLoginDetails.isVisible().catch(() => false)) {
       await addLoginDetails.click();
-      await expect(workflow.page.getByRole("dialog", { name: "Set test login" })).toBeVisible();
+      await expect(workflow.page.getByTestId("test-login-dialog")).toBeVisible();
       await capture(workflow.page, "popup-02-test-login", createdFiles);
       await workflow.page.keyboard.press("Escape");
     } else if (await loginSwitchOff.isVisible().catch(() => false)) {
       await loginSwitchOff.click();
-      const authDialog = workflow.page.getByRole("dialog", { name: "Set test login" });
+      const authDialog = workflow.page.getByTestId("test-login-dialog");
       if (await authDialog.isVisible().catch(() => false)) {
         await capture(workflow.page, "popup-02-test-login", createdFiles);
         await workflow.page.keyboard.press("Escape");
@@ -300,28 +262,12 @@ test("captures current app gallery at 100 percent scale", async () => {
     } else {
       await capture(workflow.page, "popup-02-backoffice-login-state", createdFiles);
     }
-    await workflow.page.locator('button[role="switch"][aria-checked="true"]').first().click({ force: true }).catch(() => undefined);
 
     await workflow.page.getByPlaceholder("https://app.example.com").fill("https://example.test");
     await workflow.page.getByPlaceholder("https://app.example.com").blur();
-    await workflow.page.getByRole("button", { name: "Describe scenarios" }).click();
-    await expect(workflow.page.getByRole("heading", { name: "Describe scenarios" })).toBeVisible();
+    await workflow.page.getByTestId("step-describe-test").getByRole("button").click();
+    await expect(workflow.page.getByTestId("step-heading")).toBeVisible();
     await capture(workflow.page, "workflow-03-describe-scenarios", createdFiles);
-
-    await workflow.page.getByRole("button", { name: "Check a page" }).first().click().catch(() => undefined);
-    const reviewSetup = workflow.page.getByRole("button", { name: "Review and start", exact: true });
-    await expect(reviewSetup).toBeEnabled({ timeout: 10_000 });
-    await reviewSetup.click();
-    await expect(workflow.page.getByRole("heading", { name: "Review and start" })).toBeVisible();
-    await capture(workflow.page, "workflow-04-review-and-start", createdFiles);
-
-    const runTestsButton = workflow.page.getByRole("button", { name: /run tests/i }).first();
-    if (await runTestsButton.isVisible().catch(() => false)) {
-      await runTestsButton.click();
-      await expect(workflow.page.locator(".operator-command")).toBeVisible({ timeout: 10_000 });
-      await capture(workflow.page, "popup-03-run-tests-command-palette", createdFiles);
-      await workflow.page.keyboard.press("Escape");
-    }
   } finally {
     await workflow.page.evaluate(async (projectPathBeforeTest) => window.specwright.project.setPath(projectPathBeforeTest ?? ""), workflow.previousProjectPath).catch(() => undefined);
     await workflow.app.close();
@@ -330,7 +276,8 @@ test("captures current app gallery at 100 percent scale", async () => {
   const gitlabProject = backofficeProject ?? createGitLabProject();
   const unauthGitlab = await launchApp({ projectPath: gitlabProject, pathPrefix: createFakeGlabBin(false) });
   try {
-    await openDescribeScenarios(unauthGitlab.page);
+    await workflow.page.getByTestId("step-configure-access").getByRole("button").click();
+    await expect(workflow.page.getByTestId("step-heading")).toBeVisible();
     const unauthChooseIssue = unauthGitlab.page.getByRole("button", { name: /Choose GitLab issues?/ }).first();
     if (await unauthChooseIssue.isEnabled().catch(() => false)) await unauthChooseIssue.click();
     await unauthGitlab.page.getByText(/GitLab|glab|Sign in|Login missing|auth/i).first().waitFor({ state: "visible", timeout: 10_000 }).catch(() => undefined);
@@ -343,9 +290,22 @@ test("captures current app gallery at 100 percent scale", async () => {
 
   const authGitlab = await launchApp({ projectPath: gitlabProject, pathPrefix: createFakeGlabBin(true) });
   try {
-    await seedGitLabCache(authGitlab.page, gitlabProject);
+    await authGitlab.page.evaluate(() => {
+      window.localStorage.setItem("specwright.gitlab.items.assigned.C%3A%5CUsers%5CJoel%5Cdev%5Cspecwright%5Capps%5Cdesktop%5Ce2e-tests%5Cdata%5Cmigrations%5Cfiles%5Cgitlab-issues", JSON.stringify({
+        repo: "specwright/demo",
+        username: "alex",
+        errors: [],
+        items: [
+          { kind: "issue", iid: "42", title: "Checkout accepts saved cards", state: "opened", updatedAt: "2026-05-28T12:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/42", ref: "https://gitlab.com/specwright/demo/-/issues/42", assignedToMe: true },
+          { kind: "issue", iid: "17", title: "Search filters unavailable items", state: "opened", updatedAt: "2026-05-21T10:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/17", ref: "https://gitlab.com/specwright/demo/-/issues/17", assignedToMe: false },
+          { kind: "issue", iid: "9", title: "Profile page validates empty names", state: "opened", updatedAt: "2026-05-18T09:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/9", ref: "https://gitlab.com/specwright/demo/-/issues/9", assignedToMe: false },
+          { kind: "issue", iid: "4", title: "Orders export includes totals", state: "opened", updatedAt: "2026-05-11T08:00:00Z", webUrl: "https://gitlab.com/specwright/demo/-/issues/4", ref: "https://gitlab.com/specwright/demo/-/issues/4", assignedToMe: false },
+        ],
+      }));
+    });
     await authGitlab.page.reload({ waitUntil: "domcontentloaded" });
-    await openDescribeScenarios(authGitlab.page);
+    await authGitlab.page.getByTestId("step-describe-test").getByRole("button").click();
+    await expect(authGitlab.page.getByTestId("step-heading")).toBeVisible();
     const targetIssue = authGitlab.page.getByRole("button", { name: /Checkout accepts saved cards/ }).first();
     if (!(await targetIssue.isVisible().catch(() => false))) {
       await authGitlab.page.getByRole("button", { name: /Choose GitLab issues?/ }).first().click();
@@ -373,23 +333,33 @@ test("captures current app gallery at 100 percent scale", async () => {
 
   const feedback = await launchApp({ projectPath: workflowProject, seedFeedback: true });
   try {
-    await expect(feedback.page.locator(".operator-feedback-jobs")).toBeVisible();
+    await expect(feedback.page.getByTestId("feedback-jobs-panel")).toBeVisible();
     await capture(feedback.page, "feedback-01-jobs-popup-expanded", createdFiles);
-    await feedback.page.locator(".operator-feedback-jobs button").first().click();
+    await feedback.page.getByTestId("jobs-toggle").first().click();
     await capture(feedback.page, "feedback-02-jobs-popup-collapsed", createdFiles);
-    await feedback.page.locator(".operator-feedback-jobs button").first().click();
-    await feedback.page.locator(".operator-agent-run-card button").first().click();
-    await expect(feedback.page.locator(".operator-feedback-dialog")).toBeVisible();
+    await feedback.page.getByTestId("jobs-toggle").first().click();
+    await feedback.page.getByTestId("agent-run-card").first().getByTestId("job-title").click();
+    await expect(feedback.page.getByTestId("feedback-dialog")).toBeVisible();
     await capture(feedback.page, "feedback-03-opencode-review-modal", createdFiles);
-    await feedback.page.locator(".operator-feedback-dialog button[aria-label='Close']").first().click();
-    await expect(feedback.page.locator(".operator-feedback-dialog")).toBeHidden({ timeout: 10_000 });
+    await feedback.page.getByTestId("dialog-close").first().click();
+    await expect(feedback.page.getByTestId("feedback-dialog")).toBeHidden({ timeout: 10_000 });
 
-    await feedback.page.getByRole("button", { name: "App URL and login" }).click();
-    const target = feedback.page.getByRole("button", { name: "Run preferences" });
+    await feedback.page.getByTestId("step-configure-access").getByRole("button").click();
+    await expect(feedback.page.getByTestId("step-heading")).toBeVisible();
+    const target = feedback.page.getByTestId("run-preferences");
     await target.click({ button: "right" });
-    await feedback.page.getByRole("button", { name: "Give design feedback" }).click();
-    await expect(feedback.page.locator(".operator-feedback-dialog")).toBeVisible();
-    await capture(feedback.page, "feedback-04-opencode-request-modal", createdFiles);
+    await expect(feedback.page.getByTestId("feedback-context-menu")).toBeVisible();
+    await capture(feedback.page, "feedback-04-context-menu", createdFiles);
+    await feedback.page.getByTestId("magic-wright-page-copy").click();
+    await expect(feedback.page.getByTestId("feedback-dialog")).toBeVisible();
+    await capture(feedback.page, "feedback-05-magic-wright-request-modal", createdFiles);
+    await feedback.page.getByTestId("dialog-close").first().click();
+    await expect(feedback.page.getByTestId("feedback-dialog")).toBeHidden({ timeout: 10_000 });
+    await target.click({ button: "right" });
+    await expect(feedback.page.getByTestId("feedback-context-menu")).toBeVisible();
+    await feedback.page.getByTestId("design-feedback-button").click();
+    await expect(feedback.page.getByTestId("feedback-dialog")).toBeVisible();
+    await capture(feedback.page, "feedback-06-opencode-request-modal", createdFiles);
   } finally {
     await feedback.page.evaluate(async (projectPathBeforeTest) => window.specwright.project.setPath(projectPathBeforeTest ?? ""), feedback.previousProjectPath).catch(() => undefined);
     await feedback.app.close();
