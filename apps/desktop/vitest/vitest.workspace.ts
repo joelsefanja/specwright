@@ -1,6 +1,11 @@
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 const reporters = ["default", ["allure-vitest/reporter", { resultsDir: "test-results/allure/results" }]] as const;
+
+const resolveAlias = {
+  "@renderer": path.resolve(__dirname, "..", "src", "renderer", "src"),
+};
 
 export default defineConfig({
   test: {
@@ -12,6 +17,7 @@ export default defineConfig({
           include: ["src/**/*.unit.spec.ts", "src/**/*.unit.spec.tsx"],
           environment: "node",
           globals: false,
+          alias: resolveAlias,
         },
       },
       {
@@ -20,6 +26,7 @@ export default defineConfig({
           include: ["src/**/*.component.spec.ts", "src/**/*.component.spec.tsx"],
           environment: "jsdom",
           globals: false,
+          alias: resolveAlias,
         },
       },
       {
@@ -28,6 +35,7 @@ export default defineConfig({
           include: ["src/**/*.integration.spec.ts", "src/**/*.integration.spec.tsx"],
           environment: "node",
           globals: false,
+          alias: resolveAlias,
         },
       },
     ],
