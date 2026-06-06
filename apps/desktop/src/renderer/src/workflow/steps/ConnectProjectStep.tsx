@@ -66,8 +66,8 @@ export function ConnectProjectStep({ onSelectStep }: { onSelectStep: (stepId: Wo
         <Surface variant="raised" padding="lg" className="operator-project-card" data-connected={Boolean(projectPath)}>
           <AnimatePresence mode="wait" initial={false}>
           {!projectPath ? (
-            <motion.div key="project-empty" className="operator-project-card-state operator-project-card-head" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={presenceTransition}>
-              <div className="min-w-0">
+            <motion.div key="project-empty" className="operator-project-card-state operator-project-card-head operator-project-empty-state" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={presenceTransition}>
+              <div className="min-w-0 operator-project-empty-copy">
                 <p className="operator-section-title">{text.title}</p>
                 <p className="operator-section-copy">{text.description}</p>
               </div>
@@ -154,9 +154,13 @@ export function ConnectProjectStep({ onSelectStep }: { onSelectStep: (stepId: Wo
                 </button>
               ))
             ) : (
-              <p className="rounded-[var(--sw-radius-card-compact)] border border-dashed border-operator-line px-3 py-4 text-sm text-operator-muted">
-                {text.noRecent}
-              </p>
+              <div className="operator-recent-empty-state">
+                <p>{text.noRecent}</p>
+                <Button type="button" variant="default" disabled={isBootstrapping} onClick={onOpenProject}>
+                  <FolderOpen size={16} weight="bold" />
+                  {isBootstrapping ? text.preparingProject : text.openProject}
+                </Button>
+              </div>
             )}
           </div>
         </Surface>}

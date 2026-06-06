@@ -227,6 +227,16 @@
     @apply flex flex-wrap items-center justify-between;
   }
 
+  .operator-project-empty-state {
+    align-items: center;
+    column-gap: var(--sw-space-4);
+    row-gap: var(--sw-space-2);
+  }
+
+  .operator-project-empty-copy {
+    max-width: 56ch;
+  }
+
   .operator-project-card-actions {
     display: flex;
     flex-shrink: 0;
@@ -242,7 +252,7 @@
   }
 
   .operator-project-card-state {
-    min-height: calc(92px * var(--sw-ui-scale));
+    min-height: calc(76px * var(--sw-ui-scale));
   }
 
   .operator-project-disconnect-help {

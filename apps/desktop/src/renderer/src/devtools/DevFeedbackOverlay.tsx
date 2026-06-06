@@ -604,9 +604,13 @@ function JobDetails({ job, text, onApply, onCancel, onRetry, onContinue }: { job
         <div className="operator-config-section operator-feedback-result operator-agent-transcript text-sm text-operator-muted">
           <div className="operator-agent-transcript-head">
             <span className="operator-label flex items-center gap-2"><TerminalWindow size={13} weight="duotone" />{agentOutputTitle(text)}</span>
-            <span className="operator-label">{isEnglish ? "Inspect" : "Controle"}</span>
+            <span className="operator-label">{job.status === "running" ? (isEnglish ? "Live" : "Live") : (isEnglish ? "Inspect" : "Controle")}</span>
           </div>
-          <div className="operator-agent-readable-output">{displayPrimaryOutput(job, text)}</div>
+          {job.status === "running" && job.rawOutput.trim() ? (
+            <pre className="operator-agent-live-terminal">{job.rawOutput}</pre>
+          ) : (
+            <div className="operator-agent-readable-output">{displayPrimaryOutput(job, text)}</div>
+          )}
           {job.rawOutput.trim() && !shouldShowRawOutputInline(job) && (
             <details className="operator-agent-technical-output">
               <summary>{text.technicalDetails}</summary>

@@ -598,7 +598,7 @@
   }
 
 .operator-feedback-dialog {
-    width: min(calc(100vw - (var(--sw-modal-gutter) * 2)), 620px);
+    width: min(calc(100vw - (var(--sw-modal-gutter) * 2)), 760px);
     max-height: min(calc(100vh - (var(--sw-modal-gutter) * 2)), calc(680px * var(--sw-ui-scale)));
     border-color: var(--sw-line);
     border-radius: var(--sw-radius-modal);
@@ -934,7 +934,7 @@
 .operator-feedback-jobs {
     right: var(--sw-modal-gutter);
     bottom: var(--sw-modal-gutter);
-    width: min(calc(100vw - (var(--sw-modal-gutter) * 2)), calc(300px * var(--sw-ui-scale)));
+    width: min(calc(100vw - (var(--sw-modal-gutter) * 2)), calc(360px * var(--sw-ui-scale)));
     max-height: min(calc(100vh - (var(--sw-modal-gutter) * 2)), calc(420px * var(--sw-ui-scale)));
     border-radius: var(--sw-radius-modal);
     @apply fixed z-[119] overflow-hidden;
@@ -959,7 +959,7 @@
   }
 
 .operator-feedback-jobs-list {
-    max-height: min(calc(260px * var(--sw-ui-scale)), 46vh);
+    max-height: min(calc(320px * var(--sw-ui-scale)), 50vh);
   }
 
 .operator-agent-panel-head {
