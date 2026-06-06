@@ -6,7 +6,20 @@ import { ActivityDrawer } from "./ActivityDrawer";
 import { useConfigStore } from "../store/config.store";
 import { usePipelineStore } from "../store/pipeline.store";
 import { useRunsStore, type RunRecord } from "../store/runs.store";
-import { useLanguageStore } from "../i18n/localeStore";
+
+vi.mock("../i18n/localeStore", () => ({
+  useLanguageStore: Object.assign(
+    (selector?: (s: { language: string }) => string) => selector?.({ language: "en" }) ?? { language: "en" },
+    { getState: () => ({ language: "en" }), setState: () => {} },
+  ),
+  useTranslations: () => ({
+    activity: {
+      title: "Progress",
+      empty: "No run started yet.",
+      statuses: { idle: "Waiting", running: "Running", done: "Done", error: "Failed", aborted: "Stopped" },
+    },
+  }),
+}));
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
@@ -44,8 +57,6 @@ const baseRun: RunRecord = {
 
 describe("ActivityDrawer OpenCode attach", () => {
   beforeEach(() => {
-    window.localStorage.setItem("specwright.language", "en");
-    useLanguageStore.setState({ language: "en" });
     useConfigStore.setState({ projectPath: "C:/project" });
     usePipelineStore.setState({ status: "running", logLines: [] });
     useRunsStore.setState({ runs: [] });

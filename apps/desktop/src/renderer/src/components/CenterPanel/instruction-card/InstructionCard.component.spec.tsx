@@ -3,10 +3,26 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useLanguageStore } from "../../../i18n/localeStore";
-import { useConfigStore } from "../../../store/config.store";
 import { useInstructionStore, type InstructionCard as ICard } from "../../../store/instruction.store";
 import InstructionCard from "./InstructionCard";
+
+vi.mock("@renderer/store/config.store", () => ({
+  useConfigStore: Object.assign(
+    (selector?: (s: { projectPath: string }) => string) => selector?.({ projectPath: "C:/project" }) ?? { projectPath: "C:/project" },
+    { getState: () => ({ projectPath: "C:/project" }), setState: () => {} },
+  ),
+}));
+
+vi.mock("@renderer/i18n/localeStore", () => ({
+  useLanguageStore: Object.assign(
+    (selector?: (s: { language: string }) => string) => selector?.({ language: "en" }) ?? { language: "en" },
+    { getState: () => ({ language: "en" }), setState: () => {} },
+  ),
+  useTranslations: () => {
+    const t: Record<string, string> = {};
+    return new Proxy(t, { get: () => "translated" });
+  },
+}));
 
 vi.mock("idb-keyval", () => ({
   get: vi.fn().mockResolvedValue(undefined),
@@ -47,8 +63,6 @@ function renderCard(): void {
 describe("InstructionCard steps", () => {
   beforeEach(() => {
     window.localStorage.setItem("specwright.language", "en");
-    useLanguageStore.setState({ language: "en" });
-    useConfigStore.setState({ projectPath: "C:/project" });
     useInstructionStore.setState({ cards: [baseCard] });
 
     Object.defineProperty(window, "specwright", {
