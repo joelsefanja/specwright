@@ -37,7 +37,6 @@
   gap: var(--sw-space-3);
 }
 
-.operator-access-step-label,
 .operator-access-summary-title {
   display: flex;
   align-items: center;
@@ -48,18 +47,28 @@
   line-height: 1.25;
 }
 
-.operator-access-step-label span {
-  display: inline-flex;
+.operator-access-step-label {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: calc(24px * var(--sw-ui-scale));
-  height: calc(24px * var(--sw-ui-scale));
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: var(--sw-accent-soft);
-  color: var(--sw-accent-strong);
-  font-size: var(--sw-font-size-label);
-  font-weight: 700;
+  gap: var(--sw-space-2);
+  color: var(--sw-text);
+  font-size: var(--sw-font-size-ui);
+  font-weight: 650;
+  line-height: 1.25;
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(24px * var(--sw-ui-scale));
+    height: calc(24px * var(--sw-ui-scale));
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: var(--sw-accent-soft);
+    color: var(--sw-accent-strong);
+    font-size: var(--sw-font-size-label);
+    font-weight: 700;
+  }
 }
 
 .operator-access-status {
@@ -197,29 +206,29 @@
   padding: var(--sw-space-2) var(--sw-space-3);
   color: var(--sw-text);
   text-align: left;
-}
 
-.operator-access-checklist-item:disabled {
-  cursor: default;
-}
+  &:disabled {
+    cursor: default;
+  }
 
-.operator-access-checklist-item strong,
-.operator-access-checklist-item small {
-  display: block;
-  min-width: 0;
-}
+  strong,
+  small {
+    display: block;
+    min-width: 0;
+  }
 
-.operator-access-checklist-item strong {
-  font-size: var(--sw-font-size-small);
-  font-weight: 750;
-  line-height: 1.2;
-}
+  strong {
+    font-size: var(--sw-font-size-small);
+    font-weight: 750;
+    line-height: 1.2;
+  }
 
-.operator-access-checklist-item small {
-  margin-top: calc(var(--sw-space-1) * 0.5);
-  color: var(--sw-text-muted);
-  font-size: var(--sw-font-size-small);
-  line-height: 1.25;
+  small {
+    margin-top: calc(var(--sw-space-1) * 0.5);
+    color: var(--sw-text-muted);
+    font-size: var(--sw-font-size-small);
+    line-height: 1.25;
+  }
 }
 
 .operator-access-check-dot {

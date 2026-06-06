@@ -10,10 +10,7 @@
 }
 
 .operator-agent-rail {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: color-mix(in srgb, var(--sw-surface) 70%, var(--sw-bg));
-    border-radius: var(--sw-radius-card);
-    padding: var(--sw-space-3);
+    @mixin card-surface color-mix(in srgb, var(--sw-surface) 70%, var(--sw-bg)), var(--sw-radius-card), var(--sw-space-3);
     @apply min-h-0 overflow-auto;
   }
 
@@ -57,21 +54,15 @@
   }
 
 .operator-agent-technical-output summary {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: color-mix(in srgb, var(--sw-bg) 82%, var(--sw-surface));
-    border-radius: var(--sw-radius-control);
+    @mixin card-surface color-mix(in srgb, var(--sw-bg) 82%, var(--sw-surface)), var(--sw-radius-control), var(--sw-space-2) var(--sw-space-3);
     color: var(--sw-text-muted);
     cursor: pointer;
-    padding: var(--sw-space-2) var(--sw-space-3);
     font-size: var(--sw-font-size-small);
     font-weight: 700;
   }
 
 .operator-agent-detail-box {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: color-mix(in srgb, var(--sw-panel) 68%, var(--sw-bg));
-    border-radius: var(--sw-radius-card);
-    padding: var(--sw-space-3);
+    @mixin card-surface color-mix(in srgb, var(--sw-panel) 68%, var(--sw-bg)), var(--sw-radius-card), var(--sw-space-3);
   }
 
 .operator-button:active,
@@ -90,14 +81,11 @@
   .operator-toggle:focus-visible,
   .operator-selected-action:focus-visible,
   .operator-source-image-button:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 1px var(--sw-surface), 0 0 0 calc(3px * var(--sw-ui-scale)) color-mix(in srgb, var(--sw-accent) 18%, transparent);
+    @mixin focus-ring-accent;
   }
 
 .operator-button:hover {
-    border-color: var(--sw-line-strong);
-    background: var(--sw-field);
-    color: var(--sw-text);
+    @mixin hover-elevate;
   }
 
 .operator-button-secondary,
@@ -109,9 +97,7 @@
 
 .operator-button-secondary:hover,
   .operator-button-quiet:hover {
-    border-color: var(--sw-line-strong);
-    background: var(--sw-field);
-    color: var(--sw-text);
+    @mixin hover-elevate;
   }
 
 .operator-toolbar {
@@ -188,9 +174,7 @@
   }
 
 .operator-run-detail {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.3;
+    @mixin text-muted var(--sw-font-size-small), 1.3;
     margin-top: calc(var(--sw-space-1) / 2);
     @apply truncate;
   }
@@ -326,9 +310,7 @@ textarea.operator-field {
   }
 
 .operator-readiness-list small {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
     margin-top: calc(var(--sw-space-1) / 2);
   }
 
@@ -359,9 +341,7 @@ textarea.operator-field {
   }
 
 .operator-guidance-description {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
     margin-top: var(--sw-space-1);
   }
 
@@ -458,9 +438,7 @@ textarea.operator-field {
   }
 
 .operator-setting-copy > span:last-child {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
   }
 
 .operator-field-help {
@@ -494,11 +472,7 @@ textarea.operator-field {
   }
 
 .operator-inline-card {
-    border-color: var(--sw-line);
-    background: color-mix(in srgb, var(--sw-field) 58%, transparent);
-    border-radius: var(--sw-radius-control);
-    padding: var(--sw-space-2) var(--sw-space-3);
-    @apply border;
+    @mixin inline-card;
   }
 
 .operator-muted {
@@ -536,16 +510,11 @@ textarea.operator-field {
   }
 
 .operator-plugin-description {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.4;
+    @mixin text-muted var(--sw-font-size-small), 1.4;
   }
 
 .operator-plugin-tabs {
-    border: var(--sw-border-width) solid var(--sw-line);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--sw-field) 72%, var(--sw-surface));
-    padding: calc(3px * var(--sw-ui-scale));
+    @mixin card-surface color-mix(in srgb, var(--sw-field) 72%, var(--sw-surface)), 999px, calc(3px * var(--sw-ui-scale));
     @apply flex;
   }
 
@@ -611,9 +580,7 @@ textarea.operator-field {
   }
 
 .operator-gitlab-flow span {
-    display: flex;
-    align-items: center;
-    gap: var(--sw-space-2);
+    @mixin flex-row;
     min-height: calc(34px * var(--sw-ui-scale));
     border: var(--sw-border-width) solid var(--sw-line);
     border-radius: 999px;
@@ -739,9 +706,7 @@ textarea.operator-field {
   }
 
 .operator-selected-action:hover:not(:disabled) {
-    border-color: var(--sw-line-strong);
-    background: var(--sw-field);
-    color: var(--sw-text);
+    @mixin hover-elevate;
   }
 
 .operator-selected-action-primary:hover:not(:disabled) {
@@ -762,9 +727,7 @@ textarea.operator-field {
   }
 
 .operator-source-preview-content {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.55;
+    @mixin text-muted var(--sw-font-size-small), 1.55;
     @apply min-w-0;
   }
 
@@ -816,9 +779,7 @@ textarea.operator-field {
 
 .operator-source-preview-content pre {
     overflow: auto;
-    border: var(--sw-border-width) solid var(--sw-line);
-    border-radius: var(--sw-radius-control);
-    background: var(--sw-field);
+    @mixin control-border;
     padding: var(--sw-space-3);
     @apply whitespace-pre-wrap;
   }

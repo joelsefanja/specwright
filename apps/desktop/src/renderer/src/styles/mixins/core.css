@@ -1,0 +1,55 @@
+@define-mixin card-surface $bg, $radius, $pad {
+  border: var(--sw-border-width) solid var(--sw-line);
+  background: $bg;
+  border-radius: $radius;
+  padding: $pad;
+}
+
+@define-mixin inline-card {
+  border-color: var(--sw-line);
+  background: color-mix(in srgb, var(--sw-field) 58%, transparent);
+  border-radius: var(--sw-radius-control);
+  padding: var(--sw-space-2) var(--sw-space-3);
+  @apply border;
+}
+
+@define-mixin text-muted $size: var(--sw-font-size-small), $lh: 1.35 {
+  color: var(--sw-text-muted);
+  font-size: $size;
+  line-height: $lh;
+}
+
+@define-mixin flex-row $gap: var(--sw-space-2) {
+  display: flex;
+  align-items: center;
+  gap: $gap;
+}
+
+@define-mixin grid-stack $gap: var(--sw-space-2) {
+  display: grid;
+  gap: $gap;
+}
+
+@define-mixin stack-col $gap: var(--sw-space-3) {
+  display: flex;
+  flex-direction: column;
+  gap: $gap;
+}
+
+@define-mixin control-border {
+  border: var(--sw-border-width) solid var(--sw-line);
+  border-radius: var(--sw-radius-control);
+  background: var(--sw-field);
+}
+
+@define-mixin focus-ring-accent {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--sw-surface),
+              0 0 0 calc(3px * var(--sw-ui-scale)) color-mix(in srgb, var(--sw-accent) 18%, transparent);
+}
+
+@define-mixin hover-elevate {
+  border-color: var(--sw-line-strong);
+  background: var(--sw-field);
+  color: var(--sw-text);
+}

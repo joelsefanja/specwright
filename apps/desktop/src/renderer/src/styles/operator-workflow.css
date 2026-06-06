@@ -15,15 +15,12 @@
     border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-accent) 18%, var(--sw-line));
     border-radius: var(--sw-radius-card);
     background: color-mix(in srgb, var(--sw-accent) 5%, var(--sw-field));
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.45;
+    @mixin text-muted var(--sw-font-size-small), 1.45;
     padding: var(--sw-space-3);
   }
 
 .operator-auto-label-explainer {
-    display: grid;
-    gap: var(--sw-space-2);
+    @mixin grid-stack;
     border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 76%, transparent);
     border-radius: var(--sw-radius-card-compact);
     background: color-mix(in srgb, var(--sw-field) 56%, transparent);
@@ -35,9 +32,7 @@
     grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
     gap: var(--sw-space-2);
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.4;
+    @mixin text-muted var(--sw-font-size-small), 1.4;
   }
 
 .operator-auto-label-tag {
@@ -166,8 +161,7 @@
   }
 
 .operator-context-description {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
+    @mixin text-muted;
     margin-top: var(--sw-space-1);
     @apply leading-snug;
   }
@@ -266,9 +260,7 @@
   }
 
 .operator-welcome-copy {
-    color: var(--sw-text-muted);
-    font-size: calc(17px * var(--sw-ui-scale));
-    line-height: 1.58;
+    @mixin text-muted calc(17px * var(--sw-ui-scale)), 1.58;
     max-width: 66ch;
     margin-top: var(--sw-space-4);
   }
@@ -390,8 +382,7 @@
   }
 
 .operator-form {
-    gap: var(--sw-space-4);
-    @apply flex flex-col;
+    @mixin stack-col var(--sw-space-4);
   }
 
 .operator-card-header-compact {
@@ -419,16 +410,14 @@
   }
 
 .operator-inline-row {
-    gap: var(--sw-space-2);
+    @mixin flex-row;
     border-top: var(--sw-border-width) solid var(--sw-line);
     padding-top: var(--sw-space-2);
     @apply flex items-center;
   }
 
 .operator-panel-intro {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
     border-bottom: var(--sw-border-width) solid var(--sw-line);
     padding-bottom: var(--sw-space-3);
   }
@@ -440,8 +429,7 @@
   }
 
 .operator-template-meta {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-label);
+    @mixin text-muted var(--sw-font-size-label);
   }
 
 .operator-remove-action {
@@ -451,18 +439,16 @@
   }
 
 .operator-config-section {
-    gap: var(--sw-gap-field);
+    @mixin stack-col var(--sw-gap-field);
     border: var(--sw-border-width) solid var(--sw-line);
     background: color-mix(in srgb, var(--sw-surface) 64%, var(--sw-bg));
     box-shadow: 0 10px 24px color-mix(in srgb, #000 8%, transparent);
     border-radius: var(--sw-radius-surface);
     padding: var(--sw-space-3);
-    @apply flex flex-col;
   }
 
 .operator-app-link-panel {
-    gap: var(--sw-space-3);
-    @apply grid;
+    @mixin grid-stack var(--sw-space-3);
   }
 
 .operator-activity-status[data-status="done"] {
@@ -482,13 +468,8 @@
   }
 
 .operator-activity-line {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: color-mix(in srgb, var(--sw-field) 34%, transparent);
-    color: var(--sw-text-muted);
-    border-radius: var(--sw-radius-control);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.45;
-    padding: var(--sw-space-2) var(--sw-space-3);
+    @mixin card-surface color-mix(in srgb, var(--sw-field) 34%, transparent), var(--sw-radius-control), var(--sw-space-2) var(--sw-space-3);
+    @mixin text-muted var(--sw-font-size-small), 1.45;
     overflow-wrap: anywhere;
     @apply flex flex-col;
   }
@@ -519,9 +500,7 @@
   }
 
 .operator-activity-empty {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.5;
+    @mixin text-muted var(--sw-font-size-small), 1.5;
   }
 
 @media (max-width: 1500px) {
@@ -578,7 +557,7 @@
   }
 
 .operator-readiness-card {
-    gap: var(--sw-space-3);
+    @mixin stack-col;
     border-top: var(--sw-border-width) solid var(--sw-line);
     padding-top: var(--sw-space-3);
     @apply flex flex-col;
@@ -590,26 +569,21 @@
   }
 
 .operator-readiness-card-head p:last-child {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
     margin-top: var(--sw-space-1);
   }
 
 .operator-readiness-complete {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
   }
 
 .operator-readiness-card-head span {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-label);
+    @mixin text-muted var(--sw-font-size-label);
     font-variant-numeric: tabular-nums;
   }
 
 .operator-readiness-list {
-    gap: var(--sw-space-3);
+    @mixin stack-col;
     @apply flex flex-col;
   }
 

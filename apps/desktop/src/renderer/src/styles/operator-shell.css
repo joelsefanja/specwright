@@ -75,9 +75,7 @@
   }
 
 .operator-workflow-description {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.5;
+    @mixin text-muted var(--sw-font-size-small), 1.5;
     max-width: 70ch;
     margin-top: var(--sw-space-2);
   }
@@ -496,9 +494,7 @@
   }
 
 .operator-sidebar-title span {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
     margin-top: var(--sw-space-1);
   }
 
@@ -700,9 +696,7 @@
 .operator-feedback-context-copy {
     display: block;
     margin-top: var(--sw-space-1);
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.45;
+    @mixin text-muted var(--sw-font-size-small), 1.45;
   }
 
 .operator-feedback-context-target {
@@ -741,13 +735,11 @@
   }
 
 .operator-magic-wright-options {
-    display: grid;
-    gap: calc(var(--sw-space-1) * 0.75);
+    @mixin grid-stack calc(var(--sw-space-1) * 0.75);
   }
 
 .operator-magic-wright-options button {
-    display: grid;
-    gap: calc(var(--sw-space-1) * 0.5);
+    @mixin grid-stack calc(var(--sw-space-1) * 0.5);
     width: 100%;
     border: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 82%, transparent);
     border-radius: var(--sw-radius-control);
@@ -779,9 +771,7 @@
   }
 
 .operator-magic-wright-locked-context {
-    display: flex;
-    align-items: center;
-    gap: var(--sw-space-2);
+    @mixin flex-row;
     border: var(--sw-border-width) solid color-mix(in srgb, #f59e0b 28%, var(--sw-line));
     border-radius: var(--sw-radius-control);
     background: color-mix(in srgb, #f59e0b 7%, var(--sw-surface));
@@ -872,8 +862,7 @@
   }
 
 .operator-feedback-request-field {
-    display: grid;
-    gap: var(--sw-space-2);
+    @mixin grid-stack;
   }
 
 .operator-feedback-request-field textarea {
@@ -991,10 +980,7 @@
   }
 
 .operator-agent-run-card {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: var(--sw-surface-card-muted);
-    border-radius: var(--sw-radius-card-compact);
-    padding: var(--sw-space-2) var(--sw-space-3);
+    @mixin card-surface var(--sw-surface-card-muted), var(--sw-radius-card-compact), var(--sw-space-2) var(--sw-space-3);
     transition: border-color var(--sw-motion) var(--sw-motion-ease), background var(--sw-motion) var(--sw-motion-ease);
   }
 
@@ -1021,10 +1007,7 @@
   }
 
 .operator-agent-summary {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: var(--sw-surface-accent);
-    border-radius: var(--sw-radius-card);
-    padding: var(--sw-space-4);
+    @mixin card-surface var(--sw-surface-accent), var(--sw-radius-card), var(--sw-space-4);
   }
 
 .operator-agent-summary[data-state="done"] {
@@ -1036,9 +1019,7 @@
     gap: var(--sw-space-2);
     border-top: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 76%, transparent);
     padding-top: var(--sw-space-3);
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.4;
+    @mixin text-muted var(--sw-font-size-small), 1.4;
     @apply flex flex-wrap items-center justify-between;
   }
 
@@ -1058,8 +1039,7 @@
   }
 
 .operator-run-preferences-layout {
-    display: grid;
-    gap: var(--sw-space-3);
+    @mixin grid-stack var(--sw-space-3);
   }
 
 @media (min-width: 900px) {
@@ -1075,8 +1055,7 @@
   }
 
 .operator-run-pref-section {
-    display: grid;
-    gap: var(--sw-space-2);
+    @mixin grid-stack;
     border: var(--sw-border-width) solid var(--sw-line);
     border-radius: var(--sw-radius-card-compact);
     background: color-mix(in srgb, var(--sw-field) 46%, var(--sw-surface));
@@ -1123,8 +1102,7 @@
   }
 
 .operator-run-pref-grid {
-    display: grid;
-    gap: var(--sw-space-2);
+    @mixin grid-stack;
   }
 
 .operator-run-pref-icon {
@@ -1144,8 +1122,7 @@
   }
 
 .operator-run-pref-details > summary {
-    display: grid;
-    gap: calc(var(--sw-space-1) / 2);
+    @mixin grid-stack calc(var(--sw-space-1) / 2);
     cursor: pointer;
     list-style: none;
   }

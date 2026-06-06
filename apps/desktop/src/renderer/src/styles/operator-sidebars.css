@@ -27,8 +27,7 @@
 
 .operator-project-option small,
   .operator-project-empty {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-label);
+    @mixin text-muted var(--sw-font-size-label);
     margin-top: calc(var(--sw-space-1) / 2);
     @apply block truncate;
   }
@@ -75,9 +74,7 @@
   }
 
 .operator-project-path {
-    color: var(--sw-text-muted);
-    font-size: var(--sw-font-size-small);
-    line-height: 1.35;
+    @mixin text-muted;
     margin-top: var(--sw-space-1);
     overflow-wrap: normal;
     user-select: text;
@@ -284,9 +281,7 @@
   }
 
 .operator-prefixed-field {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: var(--sw-field);
-    border-radius: var(--sw-radius-control);
+    @mixin control-border;
     min-height: var(--sw-control-height);
     @apply flex items-center transition-colors;
   }
@@ -326,9 +321,7 @@
   }
 
 .operator-prefixed-select {
-    border: var(--sw-border-width) solid var(--sw-line);
-    background: var(--sw-field);
-    border-radius: var(--sw-radius-control);
+    @mixin control-border;
     @apply flex items-stretch;
   }
 
@@ -393,8 +386,7 @@
 }
 
 .operator-advanced-group {
-    display: grid;
-    gap: var(--sw-space-3);
+    @mixin grid-stack var(--sw-space-3);
     padding-top: var(--sw-space-5);
     border-top: var(--sw-border-width) solid color-mix(in srgb, var(--sw-line) 72%, transparent);
 }
